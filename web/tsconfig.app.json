@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "esnext",
-    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom", "dom-speech-recognition"],
+    "types": ["vite/client", "dom-speech-recognition"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

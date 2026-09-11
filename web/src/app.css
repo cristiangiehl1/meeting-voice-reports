@@ -56,6 +56,11 @@ button.danger {
   border-color: var(--danger);
 }
 
+button.secondary {
+  background: transparent;
+  color: var(--focus);
+}
+
 .report-type-options {
   display: flex;
   flex-direction: column;
@@ -134,6 +139,12 @@ button.danger {
 
 .error {
   color: var(--danger);
+}
+
+.disclaimer {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .report-fields {

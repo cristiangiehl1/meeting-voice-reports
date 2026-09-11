@@ -68,3 +68,16 @@ export async function finalizeSession(baseUrl: string, sessionId: string): Promi
   }
   return parsed.data;
 }
+
+export async function sendReportEmail(baseUrl: string, reportId: string): Promise<void> {
+  const response = await fetch(joinBase(baseUrl, `/reports/${reportId}/email`), {
+    method: 'POST',
+  });
+
+  if (response.status !== 200) {
+    const json: unknown = await response.json().catch(() => null);
+    const message =
+      json && typeof json === 'object' && 'error' in json ? String((json as { error: unknown }).error) : null;
+    throw new ApiClientError(message ?? `Falha ao enviar email (HTTP ${response.status})`, response.status, json);
+  }
+}

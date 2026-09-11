@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ApiClientError, createSession, finalizeSession } from './api/client.ts';
+import { ApiClientError, createSession, finalizeSession, sendReportEmail } from './api/client.ts';
 import { loadApiBaseUrl } from './api/config.ts';
 import type { ReportType, SessionView, StoredReportView } from './api/types.ts';
 import { useSpeechSession } from './hooks/useSpeechSession.ts';
@@ -18,6 +18,7 @@ export default function App() {
   const [report, setReport] = useState<StoredReportView | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [flowError, setFlowError] = useState<string | null>(null);
 
   const audio = useSpeechSession(apiBaseUrl, session?.id ?? '');
@@ -31,6 +32,23 @@ export default function App() {
       setStep('session');
     } catch (error) {
       setFlowError(error instanceof ApiClientError ? error.message : 'Não foi possível criar a sessão');
+    } finally {
+      setCreatingSession(false);
+    }
+  }
+
+  async function handleResetRecording() {
+    if (!session) return;
+    if (audio.status === 'recording') audio.stop();
+
+    setFlowError(null);
+    setCreatingSession(true);
+    try {
+      const created = await createSession(apiBaseUrl, session.reportType);
+      setSession(created);
+      audio.reset();
+    } catch (error) {
+      setFlowError(error instanceof ApiClientError ? error.message : 'Não foi possível reiniciar a sessão');
     } finally {
       setCreatingSession(false);
     }
@@ -53,7 +71,22 @@ export default function App() {
     }
   }
 
-  function handleReset() {
+  async function handleReset() {
+    if (audio.status === 'recording') audio.stop();
+
+    if (report) {
+      setFlowError(null);
+      setSendingEmail(true);
+      try {
+        await sendReportEmail(apiBaseUrl, report.id);
+      } catch (error) {
+        console.error('Falha ao enviar email do relatório', error);
+      } finally {
+        setSendingEmail(false);
+      }
+    }
+
+    audio.reset();
     setSession(null);
     setReport(null);
     setFlowError(null);
@@ -85,6 +118,7 @@ export default function App() {
             isCapturingSpeech={audio.isCapturingSpeech}
             onStart={audio.start}
             onStop={audio.stop}
+            onReset={handleResetRecording}
             onFinalize={handleFinalize}
             finalizing={finalizing}
           />
@@ -93,8 +127,8 @@ export default function App() {
         {step === 'report' && report ? (
           <>
             <ReportView report={report} />
-            <button type="button" onClick={handleReset}>
-              Nova sessão
+            <button type="button" onClick={handleReset} disabled={sendingEmail}>
+              {sendingEmail ? 'Enviando email...' : 'Nova sessão'}
             </button>
           </>
         ) : null}

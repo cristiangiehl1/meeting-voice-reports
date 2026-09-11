@@ -8,13 +8,12 @@ export type StoredReport = {
   createdAt: string;
 };
 
-let nextId = 1;
 const reports = new Map<string, StoredReport>();
 
 export class ReportService {
   save(sessionId: string, reportType: ReportType, data: unknown): StoredReport {
     const report: StoredReport = {
-      id: String(nextId++),
+      id: crypto.randomUUID(),
       sessionId,
       reportType,
       data,

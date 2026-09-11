@@ -1,99 +1,179 @@
 # Meeting Voice Reports
 
-Ouve reuniões, entrevistas e agendamentos em tempo real (web/PWA) e gera um
-relatório estruturado ao final da sessão. Não há resposta em voz nem
-turn-taking — o app só transcreve ao vivo; o LLM entra apenas no fechamento.
+Transcreve reuniões, entrevistas e agendamentos em tempo real e gera um relatório
+estruturado ao final da sessão, enviado por email sob demanda.
+
+## Índice
+
+- [Visão geral](#visão-geral)
+- [Funcionalidades](#funcionalidades)
+- [Arquitetura](#arquitetura)
+- [Stack técnica](#stack-técnica)
+- [Estrutura do projeto](#estrutura-do-projeto)
+- [Como rodar localmente](#como-rodar-localmente)
+- [Configuração (variáveis de ambiente)](#configuração-variáveis-de-ambiente)
+- [Referência da API](#referência-da-api)
+- [Deploy](#deploy)
+- [Testes](#testes)
+- [Limitações conhecidas](#limitações-conhecidas)
+
+## Visão geral
+
+O app não tem resposta em voz nem *turn-taking* — ele só ouve e transcreve ao vivo.
+O LLM entra em um único ponto: quando a sessão é finalizada, ele lê a transcrição
+acumulada e gera um relatório estruturado (schema varia conforme o tipo de sessão).
+
+Fluxo de ponta a ponta:
+
+1. Usuário escolhe o tipo de sessão (reunião, entrevista ou agendamento) e começa a gravar.
+2. O reconhecimento de voz roda **100% no navegador** (Web Speech API) — sem custo, em tempo real.
+3. Cada trecho final reconhecido é enviado ao backend e acumulado na sessão.
+4. Ao finalizar, o backend roda um grafo LangGraph que extrai o relatório estruturado via LLM.
+5. O usuário revisa o relatório e, ao iniciar uma nova sessão, o relatório atual é enviado por email.
+
+## Funcionalidades
+
+- Transcrição em tempo real via Web Speech API nativa do navegador (sem custo de STT).
+- Medidor visual de nível/qualidade de captação de áudio durante a gravação.
+- Extração estruturada do relatório (Zod) com prompts anti-alucinação por tipo de sessão.
+- Retomar gravação de onde parou, ou resetar e começar do zero.
+- Gate de conteúdo mínimo antes de habilitar a geração do relatório.
+- Envio do relatório por email (Resend) ao encerrar a sessão.
+- Instalável como PWA.
 
 ## Arquitetura
 
 ```
-cliente web (PWA)
-  -> Web Speech API (reconhecimento de voz nativo do navegador, grátis, em tempo real)
-  -> POST /sessions/:id/transcript          (cada trecho final reconhecido)
-  -> POST /sessions/:id/finalize
-  -> LangGraph: 1 node (generateReport) roda a chain de extração estruturada
-  -> relatório salvo e devolvido (schema Zod varia por reportType)
+┌─────────────┐   Web Speech API    ┌──────────────────────────┐
+│   Cliente   │ ───────────────────▶│  POST /sessions/:id/     │
+│  web (PWA)  │   (STT no browser)  │  transcript              │
+└─────────────┘                     └────────────┬─────────────┘
+                                                  │
+                                     POST /sessions/:id/finalize
+                                                  ▼
+                                     ┌──────────────────────────┐
+                                     │  LangGraph                │
+                                     │  START → generateReport   │
+                                     │  → END                    │
+                                     │  (LLM via OpenRouter)      │
+                                     └────────────┬─────────────┘
+                                                  ▼
+                                     relatório estruturado (Zod)
+                                                  │
+                                   "Nova sessão"  ▼
+                                     POST /reports/:id/email
+                                                  │
+                                                  ▼
+                                          Resend → destinatário
 ```
 
-A transcrição roda 100% no navegador via `SpeechRecognition` (Web Speech API)
-— sem custo, em tempo real de verdade. Isso só funciona em navegadores que
-suportam a API (Chrome, Safari) **e não em PWA instalado na tela de início do
-iOS** (limitação conhecida da Apple — a API existe mas não funciona nesse
-modo). Funciona normalmente como aba de navegador em qualquer plataforma.
+## Stack técnica
 
-### Backend — Estrutura
+| Camada | Tecnologia |
+|---|---|
+| Backend | Node.js (TypeScript nativo, sem bundler), Fastify |
+| Orquestração LLM | LangChain.js + LangGraph, via OpenRouter |
+| Validação/schemas | Zod |
+| Email | Resend |
+| Frontend | React 19 + Vite, PWA (`vite-plugin-pwa`) |
+| STT | Web Speech API (nativa do navegador) |
+| Testes | Test runner nativo do Node (`node --test`) — só no backend |
 
-```
-src/
-  config.ts                     # env vars, modelo de geração do relatório
-  index.ts                      # entrypoint
-  server.ts                     # Fastify (sessions, transcript, finalize)
-  graph/
-    graph.ts                    # StateGraph (transcript -> report)
-    factory.ts
-    nodes/generateReportNode.ts
-  services/
-    openRouterService.ts        # LLM client (geração do relatório)
-    sessionService.ts           # sessões em memória (transcript acumulado)
-    reportService.ts            # relatórios em memória
-  schemas/                      # Zod: meetingReport / interviewReport / schedulingReport
-  prompts/v1/                   # prompts por tipo de relatório (few-shot, anti-alucinação)
-tests/
-```
-
-### Web — Estrutura
+## Estrutura do projeto
 
 ```
-web/
-  src/
-    App.tsx
-    hooks/useSpeechSession.ts   # Web Speech API + medidor de nível de áudio
-    components/
-      Recorder.tsx
-      LevelMeter.tsx            # intensidade/qualidade da captação em tempo real
-      ReportTypePicker.tsx
-      ReportView.tsx
-    api/                        # client HTTP (Zod-validado) pro backend
-    lib/audioLevel.ts           # RMS -> nível visual + classificação de qualidade
+.
+├── src/                          # backend
+│   ├── config.ts                 # env vars (modelo LLM, Resend)
+│   ├── server.ts                 # Fastify app + rotas
+│   ├── graph/                    # StateGraph do LangGraph
+│   ├── services/                 # sessão, relatório, LLM, email (em memória)
+│   ├── schemas/                  # um schema Zod por tipo de relatório
+│   ├── prompts/v1/                # prompts por tipo de relatório
+│   └── emails/                   # template HTML do email do relatório
+├── tests/                        # unit + e2e (node:test)
+├── web/                           # frontend
+│   └── src/
+│       ├── App.tsx
+│       ├── hooks/useSpeechSession.ts
+│       ├── components/
+│       ├── api/                  # client HTTP validado com Zod
+│       └── lib/audioLevel.ts
+├── render.yaml                    # blueprint de deploy do backend (Render)
+└── web/netlify.toml                # config de deploy do frontend (Netlify)
 ```
 
-## Modelo (OpenRouter)
+## Como rodar localmente
 
-- **`OPENROUTER_MODEL`** (geração do relatório, texto->texto estruturado):
-  default `openai/gpt-5.6-luna`. Alternativas: `openai/gpt-5-nano`,
-  `deepseek/deepseek-v4.1-flash`. Free p/ prototipar: `openrouter/free`.
-
-> Atenção com modelos que exigem *strict JSON schema* (ex: roteados via
-> Azure) — todo campo em `properties` precisa também estar em `required`.
-> Campos opcionais devem ser `z.string().nullable()` (nunca `.optional()`)
-> nos schemas em `src/schemas/`.
-
-## Instalação
+Pré-requisitos: Node.js 24+, uma API key da [OpenRouter](https://openrouter.ai) e,
+opcionalmente, uma API key da [Resend](https://resend.com).
 
 ```bash
 # backend
 npm install
-cp .env.example .env  # preencher OPENROUTER_API_KEY
+cp .env.example .env   # preencher OPENROUTER_API_KEY (e RESEND_API_KEY se for testar email)
+npm run dev             # http://localhost:3000
 
-# web
-cd web && npm install
+# frontend (outro terminal)
+cd web
+npm install
+npm run dev             # http://localhost:5173
 ```
 
-## Rodando
+## Configuração (variáveis de ambiente)
 
-```bash
-npm run dev          # backend, localhost:3000
-cd web && npm run dev # frontend, localhost:5173
-```
+### Backend (`.env`, raiz do repo)
+
+| Variável | Obrigatória | Default | Descrição |
+|---|---|---|---|
+| `OPENROUTER_API_KEY` | sim | — | Chave da OpenRouter |
+| `OPENROUTER_MODEL` | não | `openai/gpt-5.6-luna` | Modelo usado na geração do relatório |
+| `RESEND_API_KEY` | só p/ email | — | Chave da Resend |
+| `EMAIL_FROM` | não | `onboarding@resend.dev` | Remetente — sandbox só entrega pro dono da conta Resend |
+| `REPORT_EMAIL_TO` | não | `cristian.giehl@gmail.com` | Destinatário do relatório |
+| `LANGSMITH_API_KEY` | não | — | Tracing opcional via LangSmith |
+| `PORT` | não | `3000` | Porta do servidor (setada automaticamente em produção pelo Render) |
+
+> Modelos roteados via provedores que exigem *strict JSON schema* (ex: Azure) exigem
+> que todo campo opcional nos schemas Zod seja `z.string().nullable()`, nunca
+> `.optional()` — ver `src/schemas/`.
+
+### Frontend (`web/`, build-time)
+
+| Variável | Obrigatória | Default | Descrição |
+|---|---|---|---|
+| `VITE_API_BASE_URL` | em produção | `http://localhost:3000` | URL do backend — embutida no bundle em build time |
+
+## Referência da API
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/sessions` | Cria uma sessão (`{ reportType }`) |
+| `POST` | `/sessions/:id/transcript` | Acrescenta um trecho de transcrição (`{ text, speaker? }`) |
+| `POST` | `/sessions/:id/finalize` | Encerra a sessão e gera o relatório estruturado |
+| `POST` | `/reports/:id/email` | Envia o relatório já gerado por email |
+
+## Deploy
+
+- **Backend → Render**: usa `render.yaml` (Blueprint). `New → Blueprint`, conecta o
+  repo, preenche os secrets (`OPENROUTER_API_KEY`, `RESEND_API_KEY`, `LANGSMITH_API_KEY`).
+- **Frontend → Netlify**: base directory `web`, usa `web/netlify.toml` (build/publish
+  já configurados). Defina `VITE_API_BASE_URL` com a URL pública do backend no Render.
 
 ## Testes
 
 ```bash
-# backend
-npm test          # unit + e2e
-npm run test:unit # só unit (sem chamar API)
-npm run test:e2e  # só e2e (chama a API real)
-
-# web
-cd web && npm test
+npm test          # backend: unit + e2e
+npm run test:unit # só unit — sem chamar API real
+npm run test:e2e  # só e2e — chama o LLM real (precisa de OPENROUTER_API_KEY)
 ```
+
+O frontend não tem testes automatizados — validação é manual.
+
+## Limitações conhecidas
+
+- Persistência é 100% em memória — reiniciar o backend apaga sessões e relatórios.
+- Web Speech API não funciona em PWA **instalado** na tela de início do iOS (funciona
+  normalmente como aba de navegador em qualquer plataforma).
+- Sandbox `onboarding@resend.dev` só entrega email pro dono da conta Resend — para
+  enviar a qualquer destinatário é necessário verificar um domínio próprio.

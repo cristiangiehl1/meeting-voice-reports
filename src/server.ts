@@ -74,20 +74,32 @@ export const createServer = (deps: ServerDeps = {}) => {
       }
 
       const report = reportService.save(id, session.reportType, result.report);
-
-      try {
-        const html = buildReportEmailHtml(session.reportType, result.report);
-        const subject = buildReportEmailSubject(session.reportType);
-        await emailService.sendReportEmail(report.id, subject, html);
-      } catch (error) {
-        request.log.error(error, 'Falha ao enviar email do relatório');
-      }
-
       return report;
     } catch (error) {
       request.log.error(error);
       return reply.status(500).send({
         error: error instanceof Error ? error.message : 'Erro ao finalizar sessão',
+      });
+    }
+  });
+
+  app.post('/reports/:id/email', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const report = reportService.get(id);
+
+    if (!report) {
+      return reply.status(404).send({ error: 'Relatório não encontrado' });
+    }
+
+    try {
+      const html = buildReportEmailHtml(report.reportType, report.data);
+      const subject = buildReportEmailSubject(report.reportType);
+      await emailService.sendReportEmail(subject, html);
+      return reply.status(200).send({ sent: true });
+    } catch (error) {
+      request.log.error(error, 'Falha ao enviar email do relatório');
+      return reply.status(500).send({
+        error: error instanceof Error ? error.message : 'Falha ao enviar email do relatório',
       });
     }
   });

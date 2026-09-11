@@ -11,8 +11,9 @@ transcreve ao vivo; o LLM entra apenas no fechamento (finalize).
 Fluxo: cliente web (PWA) → Web Speech API (STT nativo do navegador, roda 100% no
 cliente, grátis) → `POST /sessions/:id/transcript` a cada trecho final reconhecido →
 `POST /sessions/:id/finalize` → LangGraph (1 node `generateReport`) roda extração
-estruturada via LLM → relatório salvo, devolvido (schema Zod varia por `reportType`) e
-enviado por email (Resend) para o destinatário configurado.
+estruturada via LLM → relatório salvo e devolvido (schema Zod varia por `reportType`).
+O email do relatório (Resend) só sai quando o usuário clica em "Nova sessão" na tela do
+relatório — não é mais automático no `finalize`.
 
 Limitação conhecida: Web Speech API não funciona em PWA instalado na tela de início do
 iOS (funciona normalmente como aba de navegador em qualquer plataforma).
@@ -41,8 +42,8 @@ npm run dev                # localhost:5173
 npm run build               # tsc -b + vite build
 npm run typecheck           # tsc -b --pretty false
 npm run lint                # oxlint
-npm test                    # vitest run
 ```
+Sem camada de testes no frontend (removida deliberadamente) — só typecheck + lint.
 
 Não há linter/formatter configurado no backend (raiz) — só no `web/` (oxlint).
 
@@ -52,13 +53,15 @@ Não há linter/formatter configurado no backend (raiz) — só no `web/` (oxlin
 
 - `config.ts` — env vars: `config` (modelo de geração de relatório) e `emailConfig`
   (Resend: `apiKey`, `from`, `reportRecipient`).
-- `server.ts` — Fastify app (`createServer`), 3 rotas: `POST /sessions`,
-  `POST /sessions/:id/transcript`, `POST /sessions/:id/finalize`. Aceita
-  `ServerDeps` (sessionService/reportService/emailService) para injeção em testes.
-  No `finalize`, depois de salvar o relatório, tenta enviar por email — falha de
-  email é só logada (`request.log.error`), não derruba a resposta.
+- `server.ts` — Fastify app (`createServer`), 4 rotas: `POST /sessions`,
+  `POST /sessions/:id/transcript`, `POST /sessions/:id/finalize`,
+  `POST /reports/:id/email`. Aceita `ServerDeps` (sessionService/reportService/
+  emailService) para injeção em testes. O email é disparado só quando o frontend
+  chama `/reports/:id/email` explicitamente (botão "Nova sessão"), não no `finalize`.
 - `services/emailService.ts` — `EmailService` (Resend real) e `StubEmailService`
-  (no-op, usado em testes), ambos implementando a interface `EmailSender`.
+  (no-op, usado em testes), ambos implementando a interface `EmailSender`. Sem
+  idempotency key — é um envio manual disparado pelo usuário, não uma chamada
+  automática que precise de proteção contra retry duplicado.
 - `emails/reportEmailTemplate.ts` — `buildReportEmailHtml`/`buildReportEmailSubject`,
   funções puras que renderizam o `report.data` (objeto genérico) em uma tabela HTML
   com escape de conteúdo (o texto vem de LLM/transcript, tratado como não-confiável).
@@ -73,8 +76,12 @@ Não há linter/formatter configurado no backend (raiz) — só no `web/` (oxlin
   pra API da OpenRouter (`baseURL` custom). Usa `createAgent` + `providerStrategy(schema)`
   do pacote `langchain` para forçar saída estruturada validada pelo schema Zod.
 - `services/sessionService.ts` — sessões e transcript acumulado em memória (`Map`,
-  sem persistência — reinicia o processo, perde tudo).
-- `services/reportService.ts` — relatórios finalizados em memória, mesmo padrão.
+  sem persistência — reinicia o processo, perde tudo). IDs são `crypto.randomUUID()`
+  (não sequenciais — um contador reiniciando a cada restart do processo já causou
+  colisão de idempotency key no Resend quando dois relatórios diferentes pegaram
+  o mesmo id "1" em processos diferentes).
+- `services/reportService.ts` — relatórios finalizados em memória, mesmo padrão de
+  IDs (`crypto.randomUUID()`).
 - `schemas/` — um schema Zod por `reportType` (`meeting`/`interview`/`scheduling`),
   reexportados em `schemas/index.ts` junto com `REPORT_TYPES` e `reportSchemaFor`.
   Adicionar um novo tipo de relatório = novo arquivo aqui + entrada em
@@ -102,19 +109,26 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
   final do reconhecimento é enviado (`postTranscript`) imediatamente pro backend;
   resultados interinos só atualizam estado local. `onend` reinicia o reconhecimento
   automaticamente enquanto `listeningRef` estiver true (o navegador encerra sozinho
-  periodicamente).
-- `components/Recorder.tsx`, `LevelMeter.tsx`, `ReportTypePicker.tsx`, `ReportView.tsx`
-  — UI da sessão de gravação, medidor visual de captação e exibição do relatório final.
+  periodicamente). Expõe `reset()` pra limpar transcript/status locais — precisa ser
+  chamado manualmente ao trocar/descartar sessão, já que o hook não reseta sozinho só
+  porque o `sessionId` prop mudou.
+- `components/Recorder.tsx` — controles de gravação. Quando parado com transcript
+  acumulado, mostra "Continuar gravação" (retoma, mantém o que já foi dito) e
+  "Resetar e começar do zero" (cria uma sessão nova via `onReset`, descarta tudo).
+  "Gerar relatório" só habilita com um mínimo de conteúdo transcrito
+  (`MIN_TRANSCRIPT_CHARS`), com disclaimer abaixo do transcript explicando o motivo.
+- `LevelMeter.tsx`, `ReportTypePicker.tsx`, `ReportView.tsx` — medidor visual de
+  captação e exibição do relatório final (`ReportView` é só display, sem lógica).
 - `api/client.ts` + `api/types.ts` — client HTTP fino; toda resposta do backend é
   validada com `safeParse` de um schema Zod antes de ser usada (`ApiClientError` se
   a validação ou o HTTP status falhar).
 - `lib/audioLevel.ts` — conversão de RMS em nível visual (0–1) e classificação de
-  qualidade de captação (`silencio`/etc), puro e testado isoladamente.
+  qualidade de captação (`silencio`/etc), funções puras.
 - PWA via `vite-plugin-pwa` (`vite.config.ts`), autoUpdate.
 
 ### Testes
 
-- Backend: `tests/*.unit.test.ts` (sem rede) e `tests/*.e2e.test.ts` (chamam a API
-  real do LLM) rodam com o test runner nativo do Node (`node --test`), não
-  Jest/Vitest — sem describe/it de terceiros, usar as APIs de `node:test`.
-- Frontend: Vitest + Testing Library + jsdom (`web/src/test-setup.ts`).
+Só o backend tem testes: `tests/*.unit.test.ts` (sem rede) e `tests/*.e2e.test.ts`
+(chamam a API real do LLM), com o test runner nativo do Node (`node --test`), não
+Jest/Vitest — sem describe/it de terceiros, usar as APIs de `node:test`. O frontend
+não tem testes automatizados (removido deliberadamente) — validação é manual.

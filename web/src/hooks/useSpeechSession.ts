@@ -160,6 +160,14 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     setStatus('stopped');
   }, [stopLevelMeter]);
 
+  /** Limpa a transcrição acumulada localmente — usar ao trocar de sessão ou começar do zero. */
+  const reset = useCallback(() => {
+    setTranscriptChunks([]);
+    setInterimText('');
+    setError(null);
+    setStatus('idle');
+  }, []);
+
   return {
     status,
     transcriptChunks,
@@ -170,5 +178,6 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     isCapturingSpeech,
     start,
     stop,
+    reset,
   };
 }

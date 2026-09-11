@@ -1,5 +1,11 @@
 import type { ReportType } from '../schemas/index.ts';
-import type { TranscriptChunk } from './sttService.ts';
+
+export type TranscriptChunk = {
+  text: string;
+  speaker?: string;
+  startMs: number;
+  endMs: number;
+};
 
 export type Session = {
   id: string;
@@ -9,13 +15,12 @@ export type Session = {
   finalizedAt?: string;
 };
 
-let nextId = 1;
 const sessions = new Map<string, Session>();
 
 export class SessionService {
   create(reportType: ReportType): Session {
     const session: Session = {
-      id: String(nextId++),
+      id: crypto.randomUUID(),
       reportType,
       chunks: [],
       createdAt: new Date().toISOString(),
