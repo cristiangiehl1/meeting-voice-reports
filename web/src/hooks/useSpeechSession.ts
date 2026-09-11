@@ -16,6 +16,15 @@ export function isSpeechRecognitionSupported(): boolean {
   return getSpeechRecognitionCtor() !== undefined;
 }
 
+// Em mobile (Safari/iOS e Chrome/Android), abrir um getUserMedia próprio pra alimentar o
+// medidor de nível ENQUANTO o SpeechRecognition mantém sua própria captura de microfone
+// gera dois consumidores de mic simultâneos: no Android a segunda Promise trava para
+// sempre sem rejeitar, e no Safari o navegador dispara um segundo prompt de permissão e
+// trava esperando por ele. Por isso o medidor visual só roda em desktop.
+function isMobileBrowser(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [status, setStatus] = useState<RecordingStatus>('idle');
   const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunkView[]>([]);
@@ -133,13 +142,12 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
 
     // recognition.start() precisa rodar de forma síncrona dentro do clique: em
     // Safari/iOS, se só rodar depois de um `await`, o gesto do usuário "expira" e
-    // o start() é ignorado sem erro (parece travado). A captura de stream abaixo
-    // é só para o medidor visual e roda em paralelo, sem bloquear a gravação — em
-    // Chrome/Android, dois consumidores de microfone simultâneos podem travar
-    // essa Promise indefinidamente sem nunca rejeitar.
+    // o start() é ignorado sem erro (parece travado).
     listeningRef.current = true;
     setStatus('requesting');
     startRecognition();
+
+    if (isMobileBrowser()) return;
 
     void (async () => {
       try {
@@ -185,6 +193,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     audioLevel,
     audioQuality,
     isCapturingSpeech,
+    levelMeterAvailable: !isMobileBrowser(),
     start,
     stop,
     reset,

@@ -13,6 +13,7 @@ type Props = {
   audioLevel: number;
   audioQuality: AudioQuality;
   isCapturingSpeech: boolean;
+  levelMeterAvailable: boolean;
   onStart: () => void;
   onStop: () => void;
   onReset: () => void;
@@ -28,6 +29,7 @@ export function Recorder({
   audioLevel,
   audioQuality,
   isCapturingSpeech,
+  levelMeterAvailable,
   onStart,
   onStop,
   onReset,
@@ -74,7 +76,7 @@ export function Recorder({
         {status === 'requesting' ? <span>Pedindo acesso ao microfone...</span> : null}
       </div>
 
-      {status === 'recording' ? (
+      {status === 'recording' && levelMeterAvailable ? (
         <LevelMeter level={audioLevel} quality={audioQuality} isCapturingSpeech={isCapturingSpeech} />
       ) : null}
 
