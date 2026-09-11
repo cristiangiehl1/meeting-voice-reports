@@ -43,6 +43,13 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [audioLevel, setAudioLevel] = useState(0);
   const [audioQuality, setAudioQuality] = useState<AudioQuality>('silencio');
   const [isCapturingSpeech, setIsCapturingSpeech] = useState(false);
+  // TEMPORÁRIO — diagnóstico do bug de mobile/Safari, ver conversa. Remover depois.
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const logDebug = useCallback((msg: string) => {
+    const line = `${new Date().toLocaleTimeString()} ${msg}`;
+    console.log('[speech-debug]', line);
+    setDebugLog((prev) => [...prev.slice(-24), line]);
+  }, []);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const listeningRef = useRef(false);
@@ -99,8 +106,16 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     recognition.interimResults = true;
 
     recognition.onstart = () => {
+      logDebug('recognition.onstart');
       setStatus('recording');
     };
+
+    recognition.onaudiostart = () => logDebug('recognition.onaudiostart');
+    recognition.onsoundstart = () => logDebug('recognition.onsoundstart');
+    recognition.onspeechstart = () => logDebug('recognition.onspeechstart');
+    recognition.onspeechend = () => logDebug('recognition.onspeechend');
+    recognition.onsoundend = () => logDebug('recognition.onsoundend');
+    recognition.onaudioend = () => logDebug('recognition.onaudioend');
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = '';
@@ -124,6 +139,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      logDebug(`recognition.onerror error="${event.error}" message="${event.message}"`);
       if (event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed') {
         listeningRef.current = false;
         setError('Não foi possível acessar o microfone para reconhecimento de voz.');
@@ -134,9 +150,11 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     };
 
     recognition.onend = () => {
+      logDebug(`recognition.onend listeningRef=${listeningRef.current}`);
       if (!listeningRef.current) return;
 
       if (isIOSBrowser()) {
+        logDebug('onend: iOS -> parando e aguardando toque do usuário');
         listeningRef.current = false;
         recognitionRef.current = null;
         setInterimText('');
@@ -148,13 +166,16 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     };
 
     recognitionRef.current = recognition;
+    logDebug('recognition.start() chamado');
     recognition.start();
-  }, [baseUrl, sessionId]);
+  }, [baseUrl, sessionId, logDebug]);
 
   const start = useCallback(() => {
+    logDebug('start() chamado (clique do usuário)');
     setError(null);
 
     if (!isSpeechRecognitionSupported()) {
+      logDebug('SpeechRecognition não suportado neste navegador');
       setError('Este navegador não suporta reconhecimento de voz (Web Speech API).');
       return;
     }
@@ -166,7 +187,10 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     setStatus('requesting');
     startRecognition();
 
-    if (isMobileBrowser()) return;
+    if (isMobileBrowser()) {
+      logDebug('mobile detectado -> pulando getUserMedia do medidor de nível');
+      return;
+    }
 
     void (async () => {
       try {
@@ -179,7 +203,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         console.warn('Medidor de nível de áudio indisponível:', err);
       }
     })();
-  }, [startLevelMeter, startRecognition]);
+  }, [startLevelMeter, startRecognition, logDebug]);
 
   const stop = useCallback(() => {
     listeningRef.current = false;
@@ -213,6 +237,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     audioQuality,
     isCapturingSpeech,
     levelMeterAvailable: !isMobileBrowser(),
+    debugLog,
     start,
     stop,
     reset,
