@@ -1,0 +1,42 @@
+{
+  "name": "meeting-voice-reports",
+  "version": "1.0.0",
+  "description": "Ouve reuniões, entrevistas e agendamentos em tempo real e gera relatórios estruturados ao final",
+  "type": "module",
+  "main": "src/index.ts",
+  "author": {
+    "name": "Cristian Giehl",
+    "email": "cristiangiehl@gmail.com"
+  },
+  "scripts": {
+    "start": "node --env-file .env src/index.ts",
+    "dev": "node --watch --inspect --env-file .env src/index.ts",
+    "test": "node --env-file .env --test tests/**/*.test.ts",
+    "test:unit": "node --test tests/**/*unit.test.ts",
+    "test:e2e": "node --env-file .env --test tests/**/*e2e.test.ts"
+  },
+  "keywords": [
+    "langchain",
+    "langgraph",
+    "voice",
+    "stt",
+    "relatorio"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@langchain/core": "^1.2.10",
+    "@langchain/langgraph": "^1.4.14",
+    "@langchain/openai": "^1.5.12",
+    "fastify": "^5.12.3",
+    "langchain": "^1.5.11",
+    "resend": "^6.27.0",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.12"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

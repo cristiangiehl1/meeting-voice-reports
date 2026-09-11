@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: meeting-voice-reports-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/index.ts
+    envVars:
+      - key: NODE_VERSION
+        value: 24.18.0
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-5.6-luna
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: contact@cristiangiehl.com.br
+      - key: REPORT_EMAIL_TO
+        value: cristian.giehl@gmail.com
+      - key: LANGSMITH_API_KEY
+        sync: false
+      - key: LANGCHAIN_TRACING_V2
+        value: 'true'
+      - key: LANGCHAIN_PROJECT
+        value: meeting-voice-reports

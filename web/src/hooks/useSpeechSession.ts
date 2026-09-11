@@ -1,0 +1,174 @@
+import { useCallback, useRef, useState } from 'react';
+import { postTranscript } from '../api/client.ts';
+import type { TranscriptChunkView } from '../api/types.ts';
+import { rmsFromTimeDomainData, rmsToLevel, classifyLevel, type AudioQuality } from '../lib/audioLevel.ts';
+
+export type RecordingStatus = 'idle' | 'requesting' | 'recording' | 'stopped';
+
+const LEVEL_UPDATE_INTERVAL_MS = 80;
+const SPEECH_RMS_THRESHOLD = 0.01;
+
+function getSpeechRecognitionCtor(): typeof SpeechRecognition | undefined {
+  return window.SpeechRecognition ?? window.webkitSpeechRecognition;
+}
+
+export function isSpeechRecognitionSupported(): boolean {
+  return getSpeechRecognitionCtor() !== undefined;
+}
+
+export function useSpeechSession(baseUrl: string, sessionId: string) {
+  const [status, setStatus] = useState<RecordingStatus>('idle');
+  const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunkView[]>([]);
+  const [interimText, setInterimText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [audioQuality, setAudioQuality] = useState<AudioQuality>('silencio');
+  const [isCapturingSpeech, setIsCapturingSpeech] = useState(false);
+
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const listeningRef = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelLoopIdRef = useRef<number | null>(null);
+
+  const startLevelMeter = useCallback((stream: MediaStream, audioContext: AudioContext) => {
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    analyserRef.current = analyser;
+
+    const data = new Float32Array(analyser.fftSize);
+    let lastUpdate = 0;
+
+    const loop = (time: number) => {
+      levelLoopIdRef.current = requestAnimationFrame(loop);
+      if (time - lastUpdate < LEVEL_UPDATE_INTERVAL_MS) return;
+      lastUpdate = time;
+
+      analyser.getFloatTimeDomainData(data);
+      const rms = rmsFromTimeDomainData(data);
+      const level = rmsToLevel(rms);
+      setAudioLevel(level);
+      setAudioQuality(classifyLevel(level));
+      setIsCapturingSpeech(rms >= SPEECH_RMS_THRESHOLD);
+    };
+
+    levelLoopIdRef.current = requestAnimationFrame(loop);
+  }, []);
+
+  const stopLevelMeter = useCallback(() => {
+    if (levelLoopIdRef.current !== null) {
+      cancelAnimationFrame(levelLoopIdRef.current);
+      levelLoopIdRef.current = null;
+    }
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
+    setAudioLevel(0);
+    setAudioQuality('silencio');
+    setIsCapturingSpeech(false);
+  }, []);
+
+  const startRecognition = useCallback(() => {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+
+    const recognition = new Ctor();
+    recognition.lang = 'pt-BR';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result[0]?.transcript.trim();
+        if (!text) continue;
+
+        if (result.isFinal) {
+          setTranscriptChunks((prev) => [...prev, { text, startMs: 0, endMs: 0 }]);
+          void postTranscript(baseUrl, sessionId, text).catch((err) => {
+            setError(err instanceof Error ? err.message : 'Falha ao salvar transcrição');
+          });
+        } else {
+          interim += text;
+        }
+      }
+
+      setInterimText(interim);
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed') {
+        listeningRef.current = false;
+        setError('Não foi possível acessar o microfone para reconhecimento de voz.');
+        setStatus('stopped');
+      }
+      // erros como "no-speech"/"network" são tratados pelo restart automático no onend
+    };
+
+    recognition.onend = () => {
+      if (listeningRef.current) {
+        recognition.start();
+      }
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [baseUrl, sessionId]);
+
+  const start = useCallback(async () => {
+    setError(null);
+
+    if (!isSpeechRecognitionSupported()) {
+      setError('Este navegador não suporta reconhecimento de voz (Web Speech API).');
+      return;
+    }
+
+    setStatus('requesting');
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      startLevelMeter(stream, audioContext);
+
+      listeningRef.current = true;
+      setStatus('recording');
+      startRecognition();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível acessar o microfone');
+      setStatus('idle');
+    }
+  }, [startLevelMeter, startRecognition]);
+
+  const stop = useCallback(() => {
+    listeningRef.current = false;
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+
+    stopLevelMeter();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+
+    setInterimText('');
+    setStatus('stopped');
+  }, [stopLevelMeter]);
+
+  return {
+    status,
+    transcriptChunks,
+    interimText,
+    error,
+    audioLevel,
+    audioQuality,
+    isCapturingSpeech,
+    start,
+    stop,
+  };
+}

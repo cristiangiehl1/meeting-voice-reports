@@ -1,0 +1,153 @@
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+.app__header {
+  margin-bottom: var(--space-5);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 var(--space-1);
+}
+
+.app__header h1 {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.card h2 {
+  margin: 0;
+}
+
+button {
+  border: 1px solid var(--focus);
+  background: var(--focus);
+  color: white;
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.report-type-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.report-type-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.recorder-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.transcript {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.transcript ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.level-meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.level-meter__bar {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.level-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 80ms linear;
+  background: var(--muted);
+}
+
+.level-meter__fill--silencio {
+  background: var(--muted);
+}
+
+.level-meter__fill--fraco {
+  background: var(--warning);
+}
+
+.level-meter__fill--bom {
+  background: var(--success);
+}
+
+.level-meter__fill--alto {
+  background: var(--danger);
+}
+
+.level-meter__label {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.report-fields {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.report-field dt {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.report-field dd {
+  margin: var(--space-1) 0 0;
+}
