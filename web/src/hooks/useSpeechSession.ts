@@ -25,6 +25,16 @@ function isMobileBrowser(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
+// No Safari/iOS o `continuous: true` não sustenta reconhecimento contínuo de verdade — a
+// sessão nativa encerra sozinha após poucos segundos mesmo sem erro. Reiniciar via
+// recognition.start() dentro do onend (como fazemos em desktop/Android) não vem de um toque
+// novo do usuário, e o Safari empilha um segundo pedido de permissão e trava esperando por
+// ele. Por isso no iOS não reiniciamos sozinhos: paramos e deixamos o usuário retomar pelo
+// botão "Continuar gravação", que já existe na UI e fornece o gesto síncrono que o Safari exige.
+function isIOSBrowser(): boolean {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [status, setStatus] = useState<RecordingStatus>('idle');
   const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunkView[]>([]);
@@ -119,13 +129,22 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         setError('Não foi possível acessar o microfone para reconhecimento de voz.');
         setStatus('stopped');
       }
-      // erros como "no-speech"/"network" são tratados pelo restart automático no onend
+      // erros como "no-speech"/"network" são tratados no onend (restart automático em
+      // desktop/Android; no iOS o usuário retoma manualmente, ver onend abaixo)
     };
 
     recognition.onend = () => {
-      if (listeningRef.current) {
-        recognition.start();
+      if (!listeningRef.current) return;
+
+      if (isIOSBrowser()) {
+        listeningRef.current = false;
+        recognitionRef.current = null;
+        setInterimText('');
+        setStatus('stopped');
+        return;
       }
+
+      recognition.start();
     };
 
     recognitionRef.current = recognition;
