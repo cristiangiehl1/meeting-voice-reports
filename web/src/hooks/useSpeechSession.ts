@@ -79,6 +79,10 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     recognition.continuous = true;
     recognition.interimResults = true;
 
+    recognition.onstart = () => {
+      setStatus('recording');
+    };
+
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = '';
 
@@ -119,7 +123,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     recognition.start();
   }, [baseUrl, sessionId]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(() => {
     setError(null);
 
     if (!isSpeechRecognitionSupported()) {
@@ -127,22 +131,27 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       return;
     }
 
+    // recognition.start() precisa rodar de forma síncrona dentro do clique: em
+    // Safari/iOS, se só rodar depois de um `await`, o gesto do usuário "expira" e
+    // o start() é ignorado sem erro (parece travado). A captura de stream abaixo
+    // é só para o medidor visual e roda em paralelo, sem bloquear a gravação — em
+    // Chrome/Android, dois consumidores de microfone simultâneos podem travar
+    // essa Promise indefinidamente sem nunca rejeitar.
+    listeningRef.current = true;
     setStatus('requesting');
+    startRecognition();
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      startLevelMeter(stream, audioContext);
-
-      listeningRef.current = true;
-      setStatus('recording');
-      startRecognition();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível acessar o microfone');
-      setStatus('idle');
-    }
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        const audioContext = new AudioContext();
+        audioContextRef.current = audioContext;
+        startLevelMeter(stream, audioContext);
+      } catch (err) {
+        console.warn('Medidor de nível de áudio indisponível:', err);
+      }
+    })();
   }, [startLevelMeter, startRecognition]);
 
   const stop = useCallback(() => {
