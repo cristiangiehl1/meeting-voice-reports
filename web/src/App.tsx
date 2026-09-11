@@ -116,7 +116,6 @@ export default function App() {
             audioLevel={audio.audioLevel}
             audioQuality={audio.audioQuality}
             isCapturingSpeech={audio.isCapturingSpeech}
-            levelMeterAvailable={audio.levelMeterAvailable}
             onStart={audio.start}
             onStop={audio.stop}
             onReset={handleResetRecording}
@@ -132,26 +131,6 @@ export default function App() {
               {sendingEmail ? 'Enviando email...' : 'Nova sessão'}
             </button>
           </>
-        ) : null}
-
-        {/* TEMPORÁRIO — painel de diagnóstico do bug de gravação em mobile. Remover depois. */}
-        {step === 'session' ? (
-          <pre
-            style={{
-              marginTop: 16,
-              padding: 8,
-              fontSize: 11,
-              lineHeight: 1.4,
-              background: '#111',
-              color: '#0f0',
-              maxHeight: 240,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-          >
-            {audio.debugLog.length ? audio.debugLog.join('\n') : 'aguardando eventos...'}
-          </pre>
         ) : null}
       </main>
     </div>

@@ -16,25 +16,6 @@ export function isSpeechRecognitionSupported(): boolean {
   return getSpeechRecognitionCtor() !== undefined;
 }
 
-// Em mobile (Safari/iOS e Chrome/Android), abrir um getUserMedia próprio pra alimentar o
-// medidor de nível ENQUANTO o SpeechRecognition mantém sua própria captura de microfone
-// gera dois consumidores de mic simultâneos: no Android a segunda Promise trava para
-// sempre sem rejeitar, e no Safari o navegador dispara um segundo prompt de permissão e
-// trava esperando por ele. Por isso o medidor visual só roda em desktop.
-function isMobileBrowser(): boolean {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
-
-// No Safari/iOS o `continuous: true` não sustenta reconhecimento contínuo de verdade — a
-// sessão nativa encerra sozinha após poucos segundos mesmo sem erro. Reiniciar via
-// recognition.start() dentro do onend (como fazemos em desktop/Android) não vem de um toque
-// novo do usuário, e o Safari empilha um segundo pedido de permissão e trava esperando por
-// ele. Por isso no iOS não reiniciamos sozinhos: paramos e deixamos o usuário retomar pelo
-// botão "Continuar gravação", que já existe na UI e fornece o gesto síncrono que o Safari exige.
-function isIOSBrowser(): boolean {
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
-
 export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [status, setStatus] = useState<RecordingStatus>('idle');
   const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunkView[]>([]);
@@ -43,13 +24,6 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [audioLevel, setAudioLevel] = useState(0);
   const [audioQuality, setAudioQuality] = useState<AudioQuality>('silencio');
   const [isCapturingSpeech, setIsCapturingSpeech] = useState(false);
-  // TEMPORÁRIO — diagnóstico do bug de mobile/Safari, ver conversa. Remover depois.
-  const [debugLog, setDebugLog] = useState<string[]>([]);
-  const logDebug = useCallback((msg: string) => {
-    const line = `${new Date().toLocaleTimeString()} ${msg}`;
-    console.log('[speech-debug]', line);
-    setDebugLog((prev) => [...prev.slice(-24), line]);
-  }, []);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const listeningRef = useRef(false);
@@ -105,18 +79,6 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     recognition.continuous = true;
     recognition.interimResults = true;
 
-    recognition.onstart = () => {
-      logDebug('recognition.onstart');
-      setStatus('recording');
-    };
-
-    recognition.onaudiostart = () => logDebug('recognition.onaudiostart');
-    recognition.onsoundstart = () => logDebug('recognition.onsoundstart');
-    recognition.onspeechstart = () => logDebug('recognition.onspeechstart');
-    recognition.onspeechend = () => logDebug('recognition.onspeechend');
-    recognition.onsoundend = () => logDebug('recognition.onsoundend');
-    recognition.onaudioend = () => logDebug('recognition.onaudioend');
-
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = '';
 
@@ -139,71 +101,49 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      logDebug(`recognition.onerror error="${event.error}" message="${event.message}"`);
       if (event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed') {
         listeningRef.current = false;
         setError('Não foi possível acessar o microfone para reconhecimento de voz.');
         setStatus('stopped');
       }
-      // erros como "no-speech"/"network" são tratados no onend (restart automático em
-      // desktop/Android; no iOS o usuário retoma manualmente, ver onend abaixo)
+      // erros como "no-speech"/"network" são tratados pelo restart automático no onend
     };
 
     recognition.onend = () => {
-      logDebug(`recognition.onend listeningRef=${listeningRef.current}`);
-      if (!listeningRef.current) return;
-
-      if (isIOSBrowser()) {
-        logDebug('onend: iOS -> parando e aguardando toque do usuário');
-        listeningRef.current = false;
-        recognitionRef.current = null;
-        setInterimText('');
-        setStatus('stopped');
-        return;
+      if (listeningRef.current) {
+        recognition.start();
       }
-
-      recognition.start();
     };
 
     recognitionRef.current = recognition;
-    logDebug('recognition.start() chamado');
     recognition.start();
-  }, [baseUrl, sessionId, logDebug]);
+  }, [baseUrl, sessionId]);
 
-  const start = useCallback(() => {
-    logDebug('start() chamado (clique do usuário)');
+  const start = useCallback(async () => {
     setError(null);
 
     if (!isSpeechRecognitionSupported()) {
-      logDebug('SpeechRecognition não suportado neste navegador');
       setError('Este navegador não suporta reconhecimento de voz (Web Speech API).');
       return;
     }
 
-    // recognition.start() precisa rodar de forma síncrona dentro do clique: em
-    // Safari/iOS, se só rodar depois de um `await`, o gesto do usuário "expira" e
-    // o start() é ignorado sem erro (parece travado).
-    listeningRef.current = true;
     setStatus('requesting');
-    startRecognition();
 
-    if (isMobileBrowser()) {
-      logDebug('mobile detectado -> pulando getUserMedia do medidor de nível');
-      return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      startLevelMeter(stream, audioContext);
+
+      listeningRef.current = true;
+      setStatus('recording');
+      startRecognition();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível acessar o microfone');
+      setStatus('idle');
     }
-
-    void (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        const audioContext = new AudioContext();
-        audioContextRef.current = audioContext;
-        startLevelMeter(stream, audioContext);
-      } catch (err) {
-        console.warn('Medidor de nível de áudio indisponível:', err);
-      }
-    })();
-  }, [startLevelMeter, startRecognition, logDebug]);
+  }, [startLevelMeter, startRecognition]);
 
   const stop = useCallback(() => {
     listeningRef.current = false;
@@ -236,8 +176,6 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     audioLevel,
     audioQuality,
     isCapturingSpeech,
-    levelMeterAvailable: !isMobileBrowser(),
-    debugLog,
     start,
     stop,
     reset,
