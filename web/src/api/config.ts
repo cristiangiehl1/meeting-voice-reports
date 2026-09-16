@@ -1,6 +1,6 @@
 export const API_BASE_STORAGE_KEY = 'meetingVoiceReports.apiBaseUrl';
 // Em produção (Netlify), defina VITE_API_BASE_URL com a URL do backend (Render).
-export const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+export const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4310';
 
 export function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '');

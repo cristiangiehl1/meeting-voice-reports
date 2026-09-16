@@ -112,12 +112,12 @@ opcionalmente, uma API key da [Resend](https://resend.com).
 # backend
 npm install
 cp .env.example .env   # preencher OPENROUTER_API_KEY (e RESEND_API_KEY se for testar email)
-npm run dev             # http://localhost:3000
+npm run dev             # http://localhost:4310
 
 # frontend (outro terminal)
 cd web
 npm install
-npm run dev             # http://localhost:5173
+npm run dev             # http://localhost:5183
 ```
 
 ## Configuração (variáveis de ambiente)
@@ -132,7 +132,7 @@ npm run dev             # http://localhost:5173
 | `EMAIL_FROM` | não | `onboarding@resend.dev` | Remetente — sandbox só entrega pro dono da conta Resend |
 | `REPORT_EMAIL_TO` | não | `cristian.giehl@gmail.com` | Destinatário do relatório |
 | `LANGSMITH_API_KEY` | não | — | Tracing opcional via LangSmith |
-| `PORT` | não | `3000` | Porta do servidor (setada automaticamente em produção pelo Render) |
+| `PORT` | não | `4310` | Porta do servidor (setada automaticamente em produção pelo Render); default fora de 3000/8000 pra evitar colisão com outros projetos rodando localmente |
 
 > Modelos roteados via provedores que exigem *strict JSON schema* (ex: Azure) exigem
 > que todo campo opcional nos schemas Zod seja `z.string().nullable()`, nunca
@@ -142,7 +142,7 @@ npm run dev             # http://localhost:5173
 
 | Variável | Obrigatória | Default | Descrição |
 |---|---|---|---|
-| `VITE_API_BASE_URL` | em produção | `http://localhost:3000` | URL do backend — embutida no bundle em build time |
+| `VITE_API_BASE_URL` | em produção | `http://localhost:4310` | URL do backend — embutida no bundle em build time |
 
 ## Referência da API
 

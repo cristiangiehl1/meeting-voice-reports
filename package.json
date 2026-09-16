@@ -10,7 +10,9 @@
   },
   "scripts": {
     "start": "node --env-file .env src/index.ts",
-    "dev": "node --watch --inspect --env-file .env src/index.ts",
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "node --watch --inspect --env-file .env src/index.ts",
+    "dev:web": "npm run dev --prefix web",
     "test": "node --env-file .env --test tests/**/*.test.ts",
     "test:unit": "node --test tests/**/*unit.test.ts",
     "test:e2e": "node --env-file .env --test tests/**/*e2e.test.ts"
@@ -34,7 +36,8 @@
     "zod": "^4.6.2"
   },
   "devDependencies": {
-    "@types/node": "^24.10.12"
+    "@types/node": "^24.10.12",
+    "concurrently": "^10.0.5"
   },
   "engines": {
     "node": ">=24"

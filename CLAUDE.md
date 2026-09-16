@@ -25,7 +25,7 @@ Backend (raiz do repo):
 npm install
 cp .env.example .env       # preencher OPENROUTER_API_KEY e RESEND_API_KEY
 
-npm run dev                # localhost:3000, watch mode + inspector
+npm run dev                # localhost:4310, watch mode + inspector (porta fora de 3000/8000 de propósito, ver PORT no .env.example)
 npm start                  # sem watch
 
 npm test                   # unit + e2e
@@ -38,7 +38,7 @@ Testes usam `node --test` (test runner nativo do Node), não Jest/Vitest. Para r
 Frontend (`web/`):
 ```bash
 cd web && npm install
-npm run dev                # localhost:5173
+npm run dev                # localhost:5183
 npm run build               # tsc -b + vite build
 npm run typecheck           # tsc -b --pretty false
 npm run lint                # oxlint

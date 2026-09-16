@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // 5183 em vez do 5173 padrão do Vite, que costuma colidir com outros projetos
+  // rodando em paralelo no mesmo host.
+  server: {
+    port: 5183,
+  },
   plugins: [
     react(),
     VitePWA({
