@@ -116,7 +116,6 @@ export default function App() {
             audioLevel={audio.audioLevel}
             audioQuality={audio.audioQuality}
             isCapturingSpeech={audio.isCapturingSpeech}
-            levelMeterAvailable={audio.levelMeterAvailable}
             onStart={audio.start}
             onStop={audio.stop}
             onReset={handleResetRecording}
