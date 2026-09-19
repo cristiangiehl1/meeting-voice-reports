@@ -39,6 +39,10 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const startingSessionRef = useRef(false);
   const restartTimeoutRef = useRef<number | null>(null);
   const restartAttemptsRef = useRef(0);
+  // Mensagem a usar se as tentativas de restart se esgotarem, quando a causa
+  // provável já é conhecida (microfone ocupado) e é mais útil que a genérica.
+  const giveUpMessageRef = useRef<string | null>(null);
+  const recognitionLiveRef = useRef(false);
   const startRecognitionRef = useRef<() => void>(() => {});
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -136,6 +140,8 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     listeningRef.current = false;
     startingRef.current = false;
     restartAttemptsRef.current = 0;
+    giveUpMessageRef.current = null;
+    recognitionLiveRef.current = false;
     clearRestartTimer();
 
     const recognition = recognitionRef.current;
@@ -174,8 +180,18 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const scheduleRestart = useCallback(() => {
     if (!listeningRef.current) return;
 
+    if (document.visibilityState !== 'visible') {
+      // Em segundo plano o mobile não captura áudio: reiniciar aqui só queimaria o
+      // orçamento de tentativas. O handler de visibilitychange retoma na volta.
+      clearRestartTimer();
+      return;
+    }
+
     if (restartAttemptsRef.current >= MAX_RESTART_ATTEMPTS) {
-      failWith('Não foi possível manter a captura de áudio. Verifique o microfone e comece a gravar de novo.');
+      failWith(
+        giveUpMessageRef.current ??
+          'Não foi possível manter a captura de áudio. Verifique o microfone e comece a gravar de novo.',
+      );
       return;
     }
 
@@ -232,6 +248,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       // e não pode consumir o teto de tentativas.
       startingRef.current = false;
       restartAttemptsRef.current = 0;
+      giveUpMessageRef.current = null;
       setError(null);
     };
 
@@ -252,12 +269,22 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         return;
       }
 
+      if (event.error === 'audio-capture') {
+        // O dispositivo pode só não ter sido liberado ainda (o caminho mobile para
+        // as tracks do getUserMedia logo antes de iniciar o reconhecimento). Deixar
+        // o backoff tentar de novo; se esgotar, a mensagem abaixo explica melhor
+        // que a genérica.
+        giveUpMessageRef.current = describeMicIssue('mic-busy');
+        return;
+      }
+
       const issue = mapRecognitionError(event.error);
       failWith(issue === 'unknown' ? `O reconhecimento de voz falhou (${event.error}).` : describeMicIssue(issue));
     };
 
     recognition.onend = () => {
       startingRef.current = false;
+      recognitionLiveRef.current = false;
       setIsCapturingSpeech(false);
       if (!listeningRef.current) return;
       scheduleRestart();
@@ -268,6 +295,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
 
     try {
       recognition.start();
+      recognitionLiveRef.current = true;
     } catch {
       // InvalidStateError: a instância anterior ainda não encerrou de verdade.
       startingRef.current = false;
@@ -359,7 +387,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       void wakeLockRef.current.acquire();
       restartAttemptsRef.current = 0;
 
-      if (restartTimeoutRef.current !== null) {
+      if (!recognitionLiveRef.current) {
         clearRestartTimer();
         startRecognitionRef.current();
       }
