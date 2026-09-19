@@ -180,9 +180,10 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const scheduleRestart = useCallback(() => {
     if (!listeningRef.current) return;
 
-    if (document.visibilityState !== 'visible') {
-      // Em segundo plano o mobile não captura áudio: reiniciar aqui só queimaria o
-      // orçamento de tentativas. O handler de visibilitychange retoma na volta.
+    if (!showLevelMeter && document.visibilityState !== 'visible') {
+      // Só o mobile fica impedido de capturar em segundo plano; reiniciar ali só
+      // queimaria o orçamento de tentativas. O handler de visibilitychange retoma
+      // na volta. No desktop o reconhecimento segue normalmente em aba de fundo.
       clearRestartTimer();
       return;
     }
@@ -203,10 +204,10 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       restartTimeoutRef.current = null;
       startRecognitionRef.current();
     }, delay);
-  }, [clearRestartTimer, failWith]);
+  }, [clearRestartTimer, failWith, showLevelMeter]);
 
   const startRecognition = useCallback(() => {
-    if (!listeningRef.current || startingRef.current) return;
+    if (!listeningRef.current || startingRef.current || recognitionLiveRef.current) return;
 
     const recognition = createSpeechRecognition();
     if (!recognition) {
@@ -265,6 +266,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       if (event.error === 'no-speech' || event.error === 'aborted') return;
 
       if (event.error === 'network') {
+        giveUpMessageRef.current = null;
         setError('Conexão instável com o serviço de reconhecimento. Tentando de novo...');
         return;
       }
@@ -275,6 +277,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         // o backoff tentar de novo; se esgotar, a mensagem abaixo explica melhor
         // que a genérica.
         giveUpMessageRef.current = describeMicIssue('mic-busy');
+        setError('Aguardando o microfone ficar disponível...');
         return;
       }
 
