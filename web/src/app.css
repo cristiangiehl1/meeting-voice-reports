@@ -1,7 +1,8 @@
 .app {
   max-width: 640px;
   margin: 0 auto;
-  padding: var(--space-6) var(--space-4);
+  padding: calc(var(--space-6) + env(safe-area-inset-top)) calc(var(--space-4) + env(safe-area-inset-right))
+    calc(var(--space-6) + env(safe-area-inset-bottom)) calc(var(--space-4) + env(safe-area-inset-left));
 }
 
 .app__header {
@@ -44,6 +45,8 @@ button {
   padding: var(--space-3) var(--space-4);
   cursor: pointer;
   align-self: flex-start;
+  /* Alvo de toque mínimo recomendado em mobile. */
+  min-height: 44px;
 }
 
 button:disabled {
@@ -76,6 +79,7 @@ button.secondary {
 .recorder-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 
@@ -83,8 +87,9 @@ button.secondary {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-3);
-  max-height: 240px;
+  max-height: min(240px, 40dvh);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .transcript ul {
@@ -161,4 +166,80 @@ button.secondary {
 
 .report-field dd {
   margin: var(--space-1) 0 0;
+}
+
+.notice {
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.notice__title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.notice__message {
+  margin: 0;
+}
+
+.speech-activity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.speech-activity__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--border);
+  flex: none;
+}
+
+.speech-activity--active {
+  color: var(--text);
+}
+
+.speech-activity--active .speech-activity__dot {
+  background: var(--success);
+  animation: speech-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes speech-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+@media (max-width: 560px) {
+  .card {
+    padding: var(--space-4);
+  }
+
+  .recorder-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  button {
+    width: 100%;
+    align-self: stretch;
+  }
 }
