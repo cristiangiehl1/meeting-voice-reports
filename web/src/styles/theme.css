@@ -1,0 +1,244 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* O `@theme` não pode ser aninhado em media query, então os tokens semânticos vivem em
+ * `:root` como variáveis CSS comuns e o `@theme inline` só os registra para o Tailwind
+ * gerar as utilitárias (`bg-surface`, `text-muted`, ...). Trocar o tema é trocar as
+ * variáveis; as classes continuam as mesmas. */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-canvas-deep: var(--canvas-deep);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-violet: var(--violet);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --font-display: 'Geist Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
+
+  --radius-card: 1.25rem;
+  --radius-panel: 1.75rem;
+
+  --shadow-glow: 0 0 0 1px var(--line), 0 24px 60px -28px rgb(0 0 0 / 0.75);
+  --shadow-lift: 0 1px 0 0 var(--line-strong) inset, 0 18px 40px -24px rgb(0 0 0 / 0.6);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dark é o tema base da direção visual; o claro é a variação. */
+:root {
+  color-scheme: dark;
+
+  --canvas: oklch(0.17 0.016 260);
+  --canvas-deep: oklch(0.12 0.014 260);
+  --surface: oklch(0.22 0.018 260 / 0.72);
+  --surface-raised: oklch(0.26 0.02 260 / 0.85);
+  --line: oklch(1 0 0 / 0.09);
+  --line-strong: oklch(1 0 0 / 0.16);
+  --ink: oklch(0.96 0.005 260);
+  --muted: oklch(0.72 0.02 260);
+  --faint: oklch(0.55 0.02 260);
+  --accent: oklch(0.8 0.13 196);
+  --accent-ink: oklch(0.2 0.03 220);
+  --accent-soft: oklch(0.8 0.13 196 / 0.14);
+  --violet: oklch(0.68 0.17 296);
+  --danger: oklch(0.7 0.18 22);
+  --success: oklch(0.78 0.16 158);
+  --warning: oklch(0.81 0.15 75);
+
+  --mesh-a: oklch(0.8 0.13 196 / 0.2);
+  --mesh-b: oklch(0.68 0.17 296 / 0.18);
+  --mesh-c: oklch(0.75 0.15 210 / 0.1);
+  --grain-opacity: 0.035;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --canvas: oklch(0.97 0.006 260);
+    --canvas-deep: oklch(0.93 0.008 260);
+    --surface: oklch(1 0 0 / 0.82);
+    --surface-raised: oklch(1 0 0 / 0.95);
+    --line: oklch(0.2 0.02 260 / 0.1);
+    --line-strong: oklch(0.2 0.02 260 / 0.16);
+    --ink: oklch(0.24 0.022 260);
+    --muted: oklch(0.47 0.02 260);
+    --faint: oklch(0.62 0.018 260);
+    --accent: oklch(0.58 0.13 217);
+    --accent-ink: oklch(0.99 0 0);
+    --accent-soft: oklch(0.58 0.13 217 / 0.12);
+    --violet: oklch(0.55 0.19 295);
+    --danger: oklch(0.55 0.2 25);
+    --success: oklch(0.55 0.14 158);
+    --warning: oklch(0.62 0.15 65);
+
+    --mesh-a: oklch(0.58 0.13 217 / 0.16);
+    --mesh-b: oklch(0.55 0.19 295 / 0.12);
+    --mesh-c: oklch(0.7 0.12 200 / 0.12);
+    --grain-opacity: 0.025;
+  }
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  html {
+    /* Impede o Safari no iPhone de inflar a fonte ao girar a tela. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    background: var(--canvas);
+    color: var(--ink);
+    line-height: 1.55;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: contain;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  textarea,
+  input,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+
+  /* Scrollbar discreta — a barra padrão do Chrome no dark quebra o acabamento. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+}
+
+/* Superfície de vidro: a borda clara por cima é o que dá a sensação de material,
+ * não o blur sozinho. */
+@utility glass {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+@utility glass-raised {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+}
+
+/* Linha de luz no topo do card — é o detalhe que separa "escuro" de "sofisticado". */
+@utility hairline-top {
+  &::before {
+    content: '';
+    position: absolute;
+    inset-inline: 10%;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+    pointer-events: none;
+  }
+}
+
+@utility text-gradient {
+  background: linear-gradient(120deg, var(--ink) 20%, var(--accent) 65%, var(--violet) 95%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+@utility grain {
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.9;
+  }
+}
+
+@keyframes caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  55%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(4%, -6%, 0) scale(1.08);
+  }
+  66% {
+    transform: translate3d(-5%, 4%, 0) scale(0.95);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

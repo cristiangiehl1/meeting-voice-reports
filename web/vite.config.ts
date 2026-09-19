@@ -1,8 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // Tela única com precache total: o app inteiro é baixado de uma vez na instalação do
+  // PWA, então quebrar em chunks não adiantaria nada além de silenciar o aviso.
+  build: { chunkSizeWarningLimit: 700 },
   // 5183 em vez do 5173 padrão do Vite, que costuma colidir com outros projetos
   // rodando em paralelo no mesmo host.
   server: {
@@ -14,16 +18,23 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // As fontes são self-hosted pra funcionar offline, mas só o subset latin entra
+        // no precache: os demais (cyrillic, greek, vietnamese) nunca são baixados em
+        // pt-BR, e precachear tudo triplicaria o peso da instalação.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}', '**/*-latin-wght-normal-*.woff2'],
+      },
       manifest: {
         name: 'Meeting Voice Reports',
         short_name: 'MV Reports',
         // Sem isto o vite-plugin-pwa emite "lang": "en" por padrão.
         lang: 'pt-BR',
         description: 'Ouve reuniões, entrevistas e agendamentos e gera relatórios estruturados.',
-        theme_color: '#0b6bcb',
-        background_color: '#f4f6f8',
+        theme_color: '#131820',
+        background_color: '#131820',
         // A Web Speech API não funciona em PWA instalado na tela de início do iOS, e o
         // app é inteiro STT — instalado em standalone ele simplesmente não serve pra
         // nada. O iOS ignora `display_override` e cai no `display`, então abre o ícone

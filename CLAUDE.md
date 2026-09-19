@@ -111,7 +111,9 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
 ### Frontend (`web/`)
 
 - `App.tsx` — tela única, orquestra picker de tipo de relatório → gravação → view do
-  relatório.
+  relatório. Erros de fluxo viram toast (`sonner`) em vez de texto na página. O
+  `Recorder` é montado com `key={session.id}`: remontar por sessão é o que zera o
+  cronômetro de gravação junto com o transcript.
 - `hooks/useSpeechSession.ts` — todo o STT roda aqui: `SpeechRecognition` nativo do
   navegador (`window.SpeechRecognition ?? window.webkitSpeechRecognition`). Cada
   resultado final é enviado (`postTranscript`) imediatamente pro backend; resultados
@@ -146,26 +148,53 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
   no iOS), nenhum `audioinput` e permissão já negada.
 - `lib/wakeLock.ts` — wrapper do Screen Wake Lock; sem ele a tela do celular apaga
   durante a reunião e a captura morre.
-- `components/Recorder.tsx` — controles de gravação. Quando parado com transcript
-  acumulado, mostra "Continuar gravação" (retoma, mantém o que já foi dito) e
-  "Resetar e começar do zero" (cria uma sessão nova via `onReset`, descarta tudo).
+- `components/Recorder.tsx` — controles de gravação, com um botão único que alterna
+  gravar/parar. Quando parado com transcript acumulado, o mesmo botão retoma (mantendo
+  o que já foi dito) e "Descartar e recomeçar" cria uma sessão nova via `onReset`.
   "Gerar relatório" só habilita com um mínimo de conteúdo transcrito
-  (`MIN_TRANSCRIPT_CHARS`), com disclaimer abaixo do transcript explicando o motivo.
-- `LevelMeter.tsx`, `ReportTypePicker.tsx`, `ReportView.tsx` — medidor visual de
-  captação e exibição do relatório final (`ReportView` é só display, sem lógica).
+  (`MIN_TRANSCRIPT_CHARS`).
+- `components/AppShell.tsx` — moldura de todas as telas: fundo de gradiente em malha,
+  header e stepper de três passos. A troca de passo usa `AnimatePresence mode="wait"`.
+  As manchas do fundo são animadas por CSS, não por Motion, pra não ocupar o main
+  thread durante a gravação.
+- `components/AudioVisualizer.tsx` — substitui o antigo `LevelMeter`/
+  `SpeechActivityIndicator`. No desktop desenha a forma de onda a partir do
+  `audioLevel`; no mobile (`!showLevelMeter`, sem RMS disponível) desenha um orbe
+  pulsante ligado a `isCapturingSpeech`, e a legenda fala de atividade de fala em vez
+  de qualidade de captação — prometer "captando bem" sem medir seria mentira.
+- `components/TranscriptPanel.tsx` — transcript com entrada animada por chunk, interim
+  em itálico com cursor e auto-scroll. O mínimo de caracteres aparece como anel de
+  progresso.
+- `components/FinalizingOverlay.tsx` — overlay durante o `finalize`. Os passos são
+  indicativos: o backend não reporta progresso. O avanço vive num componente interno
+  que só monta com o overlay aberto, então cada finalize recomeça do primeiro passo
+  sem efeito de reset.
+- `hooks/useElapsedTime.ts` — cronômetro de gravação, acumulando os trechos ativos pra
+  que pausar e continuar não zere o relógio.
+- `ReportTypePicker.tsx` (cards sobre Radix RadioGroup), `ReportView.tsx` (só display,
+  sem lógica além de achatar o `data` genérico pra copiar como texto).
 - `MicStatusNotice.tsx` — aviso exibido quando `micStatus.kind === 'blocked'`. Título,
   mensagem e ações vêm todos de `micSupport.ts` e variam por `issue`: "Verificar de novo"
   só aparece para bloqueios que podem mudar sem sair da página (`isRecheckable` — um
   botão que nunca pode dar certo é pior que botão nenhum), e o caso de PWA no iOS ganha
   um link "Abrir no Safari", que precisa ser âncora de verdade com `target="_blank"` pro
   iOS escapar do modo standalone.
-- `SpeechActivityIndicator.tsx` — substitui o `LevelMeter` no mobile
-  (`!showLevelMeter`), já que ali não há RMS pra mostrar.
 - `api/client.ts` + `api/types.ts` — client HTTP fino; toda resposta do backend é
   validada com `safeParse` de um schema Zod antes de ser usada (`ApiClientError` se
   a validação ou o HTTP status falhar).
 - `lib/audioLevel.ts` — conversão de RMS em nível visual (0–1) e classificação de
   qualidade de captação (`silencio`/etc), funções puras.
+- `styles/theme.css` — Tailwind v4 com config CSS-first. O `@theme` não pode ser
+  aninhado em media query, então os tokens semânticos são variáveis CSS comuns em
+  `:root` (dark, o tema base) sobrescritas em `@media (prefers-color-scheme: light)`,
+  e o `@theme inline` só as registra pro Tailwind gerar as utilitárias. Cores em OKLCH.
+  As utilitárias próprias (`glass`, `hairline-top`, `text-gradient`, `grain`,
+  `tabular`) são declaradas com `@utility`.
+- `components/ui/` — `Button` (variantes via `cva`), `Card`, `Badge` e o util `cn()`
+  (clsx + tailwind-merge). Primitivas acessíveis vêm do pacote único `radix-ui`.
+- Fontes self-hosted via `@fontsource-variable` (Geist no display, Inter no corpo) —
+  o app é PWA e não pode depender de CDN de fonte em runtime. Só o subset latin entra
+  no precache; ver `workbox.globPatterns` no `vite.config.ts`.
 - PWA via `vite-plugin-pwa` (`vite.config.ts`), autoUpdate. O manifesto declara
   `display: 'browser'` com `display_override: ['standalone']`, e a ordem importa: o
   iOS ignora `display_override` e cai no `display`, abrindo o ícone da tela de início

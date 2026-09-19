@@ -1,15 +1,17 @@
 import { useState } from 'react';
+import { Toaster, toast } from 'sonner';
+import { Sparkles } from 'lucide-react';
 import { ApiClientError, createSession, finalizeSession, sendReportEmail } from './api/client.ts';
 import { loadApiBaseUrl } from './api/config.ts';
 import type { ReportType, SessionView, StoredReportView } from './api/types.ts';
 import { useSpeechSession } from './hooks/useSpeechSession.ts';
+import { AppShell, type Step } from './components/AppShell.tsx';
 import { ReportTypePicker } from './components/ReportTypePicker.tsx';
 import { Recorder } from './components/Recorder.tsx';
 import { MicStatusNotice } from './components/MicStatusNotice.tsx';
 import { ReportView } from './components/ReportView.tsx';
-import './app.css';
-
-type Step = 'pick-type' | 'session' | 'report';
+import { FinalizingOverlay } from './components/FinalizingOverlay.tsx';
+import { Button } from './components/ui/Button.tsx';
 
 export default function App() {
   const [apiBaseUrl] = useState(() => loadApiBaseUrl());
@@ -20,19 +22,21 @@ export default function App() {
   const [creatingSession, setCreatingSession] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
-  const [flowError, setFlowError] = useState<string | null>(null);
 
   const audio = useSpeechSession(apiBaseUrl, session?.id ?? '');
 
+  function reportFlowError(error: unknown, fallback: string) {
+    toast.error(error instanceof ApiClientError ? error.message : fallback);
+  }
+
   async function handleStartSession() {
-    setFlowError(null);
     setCreatingSession(true);
     try {
       const created = await createSession(apiBaseUrl, reportType);
       setSession(created);
       setStep('session');
     } catch (error) {
-      setFlowError(error instanceof ApiClientError ? error.message : 'Não foi possível criar a sessão');
+      reportFlowError(error, 'Não foi possível criar a sessão');
     } finally {
       setCreatingSession(false);
     }
@@ -42,14 +46,14 @@ export default function App() {
     if (!session) return;
     if (audio.status !== 'idle') audio.stop();
 
-    setFlowError(null);
     setCreatingSession(true);
     try {
       const created = await createSession(apiBaseUrl, session.reportType);
       setSession(created);
       audio.reset();
+      toast.success('Gravação descartada. Pode começar de novo.');
     } catch (error) {
-      setFlowError(error instanceof ApiClientError ? error.message : 'Não foi possível reiniciar a sessão');
+      reportFlowError(error, 'Não foi possível reiniciar a sessão');
     } finally {
       setCreatingSession(false);
     }
@@ -59,14 +63,13 @@ export default function App() {
     if (!session) return;
     if (audio.status !== 'idle') audio.stop();
 
-    setFlowError(null);
     setFinalizing(true);
     try {
       const generated = await finalizeSession(apiBaseUrl, session.id);
       setReport(generated);
       setStep('report');
     } catch (error) {
-      setFlowError(error instanceof ApiClientError ? error.message : 'Não foi possível gerar o relatório');
+      reportFlowError(error, 'Não foi possível gerar o relatório');
     } finally {
       setFinalizing(false);
     }
@@ -76,12 +79,13 @@ export default function App() {
     if (audio.status !== 'idle') audio.stop();
 
     if (report) {
-      setFlowError(null);
       setSendingEmail(true);
       try {
         await sendReportEmail(apiBaseUrl, report.id);
+        toast.success('Relatório enviado por email.');
       } catch (error) {
         console.error('Falha ao enviar email do relatório', error);
+        toast.error('O relatório não pôde ser enviado por email.');
       } finally {
         setSendingEmail(false);
       }
@@ -90,28 +94,27 @@ export default function App() {
     audio.reset();
     setSession(null);
     setReport(null);
-    setFlowError(null);
     setStep('pick-type');
   }
 
   return (
-    <div className="app">
-      <header className="app__header">
-        <p className="eyebrow">Meeting Voice Reports</p>
-        <h1>Ouça, transcreva e gere o relatório</h1>
-      </header>
-
-      <main className="app__main">
-        {flowError ? <p className="error">{flowError}</p> : null}
-
+    <>
+      <AppShell step={step}>
         <MicStatusNotice status={audio.micStatus} onRecheck={audio.refreshMicStatus} />
 
         {step === 'pick-type' ? (
-          <ReportTypePicker value={reportType} onChange={setReportType} onStart={handleStartSession} busy={creatingSession} />
+          <ReportTypePicker
+            value={reportType}
+            onChange={setReportType}
+            onStart={() => void handleStartSession()}
+            busy={creatingSession}
+          />
         ) : null}
 
         {step === 'session' && session ? (
           <Recorder
+            // Remontar por sessão zera o cronômetro de gravação junto com o transcript.
+            key={session.id}
             status={audio.status}
             transcriptChunks={audio.transcriptChunks}
             interimText={audio.interimText}
@@ -123,8 +126,8 @@ export default function App() {
             showLevelMeter={audio.showLevelMeter}
             onStart={audio.start}
             onStop={audio.stop}
-            onReset={handleResetRecording}
-            onFinalize={handleFinalize}
+            onReset={() => void handleResetRecording()}
+            onFinalize={() => void handleFinalize()}
             finalizing={finalizing}
           />
         ) : null}
@@ -132,12 +135,28 @@ export default function App() {
         {step === 'report' && report ? (
           <>
             <ReportView report={report} />
-            <button type="button" onClick={handleReset} disabled={sendingEmail}>
-              {sendingEmail ? 'Enviando email...' : 'Nova sessão'}
-            </button>
+            <div className="flex justify-end pt-2">
+              <Button
+                size="lg"
+                onClick={() => void handleReset()}
+                loading={sendingEmail}
+                icon={sendingEmail ? undefined : <Sparkles className="size-4" />}
+              >
+                {sendingEmail ? 'Enviando email' : 'Nova sessão'}
+              </Button>
+            </div>
           </>
         ) : null}
-      </main>
-    </div>
+      </AppShell>
+
+      <FinalizingOverlay open={finalizing} />
+      <Toaster
+        position="top-center"
+        theme="system"
+        toastOptions={{
+          className: 'glass-raised !rounded-full !text-ink font-sans',
+        }}
+      />
+    </>
   );
 }
