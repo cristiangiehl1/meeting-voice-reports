@@ -279,8 +279,12 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       if (!lastCycleErroredRef.current) restartAttemptsRef.current = 0;
       lastCycleErroredRef.current = false;
       giveUpMessageRef.current = null;
-      setError((current) => (current !== null && current === recoverableErrorRef.current ? null : current));
+      // Fotografar o ref antes de anula-lo: o updater do setError pode rodar num
+      // render posterior, quando `recoverableErrorRef.current` ja seria null e a
+      // comparacao falharia, deixando o aviso na tela depois da recuperacao.
+      const recoverable = recoverableErrorRef.current;
       recoverableErrorRef.current = null;
+      setError((current) => (current !== null && current === recoverable ? null : current));
     };
 
     recognition.onspeechstart = () => {
@@ -395,6 +399,12 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         if (audioContext.state === 'suspended') {
           await audioContext.resume().catch(() => undefined);
         }
+        if (abortStartRef.current) {
+          // Quarto ponto de suspensao: um teardown aqui ja soltou os refs, entao a
+          // continuacao ligaria o medidor num contexto fechado.
+          releaseAudioResources();
+          return;
+        }
         startLevelMeter(stream, audioContext);
       } else {
         // Android e iOS dão acesso exclusivo ao microfone: manter este MediaStream
@@ -410,7 +420,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     } finally {
       startingSessionRef.current = false;
     }
-  }, [showLevelMeter, startLevelMeter, startRecognition]);
+  }, [releaseAudioResources, showLevelMeter, startLevelMeter, startRecognition]);
 
   const stop = useCallback(() => {
     teardown();

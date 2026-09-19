@@ -73,7 +73,7 @@ export default function App() {
   }
 
   async function handleReset() {
-    if (audio.status === 'recording') audio.stop();
+    if (audio.status !== 'idle') audio.stop();
 
     if (report) {
       setFlowError(null);
