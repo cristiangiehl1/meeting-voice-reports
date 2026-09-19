@@ -1,20 +1,25 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { postTranscript } from '../api/client.ts';
 import type { TranscriptChunkView } from '../api/types.ts';
 import { rmsFromTimeDomainData, rmsToLevel, classifyLevel, type AudioQuality } from '../lib/audioLevel.ts';
+import {
+  createSpeechRecognition,
+  describeMicIssue,
+  detectMicrophone,
+  mapGetUserMediaError,
+  mapRecognitionError,
+  supportsLevelMeter,
+  type MicStatus,
+} from '../lib/micSupport.ts';
+import { createScreenWakeLock } from '../lib/wakeLock.ts';
 
 export type RecordingStatus = 'idle' | 'requesting' | 'recording' | 'stopped';
 
 const LEVEL_UPDATE_INTERVAL_MS = 80;
 const SPEECH_RMS_THRESHOLD = 0.01;
-
-function getSpeechRecognitionCtor(): typeof SpeechRecognition | undefined {
-  return window.SpeechRecognition ?? window.webkitSpeechRecognition;
-}
-
-export function isSpeechRecognitionSupported(): boolean {
-  return getSpeechRecognitionCtor() !== undefined;
-}
+const RESTART_BASE_DELAY_MS = 300;
+const RESTART_MAX_DELAY_MS = 5000;
+const MAX_RESTART_ATTEMPTS = 8;
 
 export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [status, setStatus] = useState<RecordingStatus>('idle');
@@ -24,13 +29,54 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [audioLevel, setAudioLevel] = useState(0);
   const [audioQuality, setAudioQuality] = useState<AudioQuality>('silencio');
   const [isCapturingSpeech, setIsCapturingSpeech] = useState(false);
+  const [micStatus, setMicStatus] = useState<MicStatus>({ kind: 'checking' });
+  const [showLevelMeter] = useState(() => supportsLevelMeter());
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const listeningRef = useRef(false);
+  const startingRef = useRef(false);
+  const restartTimeoutRef = useRef<number | null>(null);
+  const restartAttemptsRef = useRef(0);
+  const startRecognitionRef = useRef<() => void>(() => {});
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const levelLoopIdRef = useRef<number | null>(null);
+  const wakeLockRef = useRef(createScreenWakeLock());
+
+  // Uma instância de reconhecimento já em execução precisa postar sempre na sessão
+  // atual, não na que estava ativa quando ela foi criada.
+  const baseUrlRef = useRef(baseUrl);
+  const sessionIdRef = useRef(sessionId);
+
+  useEffect(() => {
+    baseUrlRef.current = baseUrl;
+    sessionIdRef.current = sessionId;
+  }, [baseUrl, sessionId]);
+
+  const refreshMicStatus = useCallback(async () => {
+    setMicStatus(await detectMicrophone());
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const check = () => {
+      void detectMicrophone().then((result) => {
+        if (active) setMicStatus(result);
+      });
+    };
+
+    check();
+
+    const devices = navigator.mediaDevices;
+    devices?.addEventListener('devicechange', check);
+
+    return () => {
+      active = false;
+      devices?.removeEventListener('devicechange', check);
+    };
+  }, []);
 
   const startLevelMeter = useCallback((stream: MediaStream, audioContext: AudioContext) => {
     const source = audioContext.createMediaStreamSource(stream);
@@ -67,19 +113,97 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     analyserRef.current = null;
     setAudioLevel(0);
     setAudioQuality('silencio');
-    setIsCapturingSpeech(false);
   }, []);
 
-  const startRecognition = useCallback(() => {
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) return;
+  const releaseAudioResources = useCallback(() => {
+    stopLevelMeter();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+  }, [stopLevelMeter]);
 
-    const recognition = new Ctor();
+  const clearRestartTimer = useCallback(() => {
+    if (restartTimeoutRef.current !== null) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+  }, []);
+
+  const teardown = useCallback(() => {
+    listeningRef.current = false;
+    startingRef.current = false;
+    restartAttemptsRef.current = 0;
+    clearRestartTimer();
+
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
+      // Zerar os handlers antes de abortar: o abort dispara onend, que reagendaria
+      // um restart se o handler ainda estivesse instalado.
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      recognition.onaudiostart = null;
+      recognition.onspeechstart = null;
+      recognition.onspeechend = null;
+      try {
+        recognition.abort();
+      } catch {
+        // Instância já encerrada.
+      }
+    }
+
+    releaseAudioResources();
+    void wakeLockRef.current.release();
+    setInterimText('');
+    setIsCapturingSpeech(false);
+  }, [clearRestartTimer, releaseAudioResources]);
+
+  const failWith = useCallback(
+    (message: string) => {
+      teardown();
+      setError(message);
+      setStatus('stopped');
+    },
+    [teardown],
+  );
+
+  const scheduleRestart = useCallback(() => {
+    if (!listeningRef.current) return;
+
+    if (restartAttemptsRef.current >= MAX_RESTART_ATTEMPTS) {
+      failWith('Não foi possível manter a captura de áudio. Verifique o microfone e comece a gravar de novo.');
+      return;
+    }
+
+    const delay = Math.min(RESTART_BASE_DELAY_MS * 2 ** restartAttemptsRef.current, RESTART_MAX_DELAY_MS);
+    restartAttemptsRef.current += 1;
+
+    clearRestartTimer();
+    restartTimeoutRef.current = window.setTimeout(() => {
+      restartTimeoutRef.current = null;
+      startRecognitionRef.current();
+    }, delay);
+  }, [clearRestartTimer, failWith]);
+
+  const startRecognition = useCallback(() => {
+    if (!listeningRef.current || startingRef.current) return;
+
+    const recognition = createSpeechRecognition();
+    if (!recognition) {
+      failWith(describeMicIssue('no-speech-recognition'));
+      return;
+    }
+
     recognition.lang = 'pt-BR';
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      restartAttemptsRef.current = 0;
+
       let interim = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -89,7 +213,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
 
         if (result.isFinal) {
           setTranscriptChunks((prev) => [...prev, { text, startMs: 0, endMs: 0 }]);
-          void postTranscript(baseUrl, sessionId, text).catch((err) => {
+          void postTranscript(baseUrlRef.current, sessionIdRef.current, text).catch((err) => {
             setError(err instanceof Error ? err.message : 'Falha ao salvar transcrição');
           });
         } else {
@@ -100,73 +224,135 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       setInterimText(interim);
     };
 
+    recognition.onaudiostart = () => {
+      // A captura de áudio começou de fato: o microfone é nosso e o ciclo está
+      // saudável. Zerar o backoff — o encerramento periódico em silêncio é normal
+      // e não pode consumir o teto de tentativas.
+      startingRef.current = false;
+      restartAttemptsRef.current = 0;
+    };
+
+    recognition.onspeechstart = () => setIsCapturingSpeech(true);
+    recognition.onspeechend = () => setIsCapturingSpeech(false);
+
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed') {
-        listeningRef.current = false;
-        setError('Não foi possível acessar o microfone para reconhecimento de voz.');
-        setStatus('stopped');
+      // 'no-speech' e 'aborted' fazem parte da operação normal: o navegador encerra
+      // sozinho e o onend reinicia.
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+
+      if (event.error === 'network') {
+        setError('Conexão instável com o serviço de reconhecimento. Tentando de novo...');
+        return;
       }
-      // erros como "no-speech"/"network" são tratados pelo restart automático no onend
+
+      const issue = mapRecognitionError(event.error);
+      failWith(issue === 'unknown' ? `O reconhecimento de voz falhou (${event.error}).` : describeMicIssue(issue));
     };
 
     recognition.onend = () => {
-      if (listeningRef.current) {
-        recognition.start();
-      }
+      startingRef.current = false;
+      setIsCapturingSpeech(false);
+      if (!listeningRef.current) return;
+      scheduleRestart();
     };
 
     recognitionRef.current = recognition;
-    recognition.start();
-  }, [baseUrl, sessionId]);
+    startingRef.current = true;
+
+    try {
+      recognition.start();
+    } catch {
+      // InvalidStateError: a instância anterior ainda não encerrou de verdade.
+      startingRef.current = false;
+      scheduleRestart();
+    }
+  }, [failWith, scheduleRestart]);
+
+  useEffect(() => {
+    startRecognitionRef.current = startRecognition;
+  }, [startRecognition]);
 
   const start = useCallback(async () => {
     setError(null);
 
-    if (!isSpeechRecognitionSupported()) {
-      setError('Este navegador não suporta reconhecimento de voz (Web Speech API).');
+    const detected = await detectMicrophone();
+    setMicStatus(detected);
+    if (detected.kind === 'blocked') {
+      setError(detected.message);
       return;
     }
 
     setStatus('requesting');
 
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch (err) {
+      const issue = mapGetUserMediaError(err);
+      const message = describeMicIssue(issue);
+      setMicStatus({ kind: 'blocked', issue, message });
+      setError(message);
+      setStatus('idle');
+      return;
+    }
+
+    if (showLevelMeter) {
+      // No desktop o microfone é compartilhado entre o medidor e o reconhecimento.
       streamRef.current = stream;
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume().catch(() => undefined);
+      }
       startLevelMeter(stream, audioContext);
-
-      listeningRef.current = true;
-      setStatus('recording');
-      startRecognition();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível acessar o microfone');
-      setStatus('idle');
+    } else {
+      // Android e iOS dão acesso exclusivo ao microfone: manter este MediaStream
+      // aberto faria o SpeechRecognition não capturar absolutamente nada.
+      stream.getTracks().forEach((track) => track.stop());
     }
-  }, [startLevelMeter, startRecognition]);
+
+    listeningRef.current = true;
+    restartAttemptsRef.current = 0;
+    setStatus('recording');
+    startRecognition();
+    void wakeLockRef.current.acquire();
+  }, [showLevelMeter, startLevelMeter, startRecognition]);
 
   const stop = useCallback(() => {
-    listeningRef.current = false;
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
-
-    stopLevelMeter();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    void audioContextRef.current?.close();
-    audioContextRef.current = null;
-
-    setInterimText('');
+    teardown();
     setStatus('stopped');
-  }, [stopLevelMeter]);
+  }, [teardown]);
 
   /** Limpa a transcrição acumulada localmente — usar ao trocar de sessão ou começar do zero. */
   const reset = useCallback(() => {
+    teardown();
     setTranscriptChunks([]);
-    setInterimText('');
     setError(null);
     setStatus('idle');
-  }, []);
+  }, [teardown]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible' || !listeningRef.current) return;
+
+      // O mobile encerra o reconhecimento e solta o wake lock quando a aba vai pro
+      // segundo plano. Ao voltar, retomar os dois sem esperar o backoff.
+      void wakeLockRef.current.acquire();
+      restartAttemptsRef.current = 0;
+
+      if (restartTimeoutRef.current !== null) {
+        clearRestartTimer();
+        startRecognitionRef.current();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [clearRestartTimer]);
+
+  useEffect(() => teardown, [teardown]);
 
   return {
     status,
@@ -176,8 +362,11 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     audioLevel,
     audioQuality,
     isCapturingSpeech,
+    micStatus,
+    showLevelMeter,
     start,
     stop,
     reset,
+    refreshMicStatus,
   };
 }
