@@ -7,6 +7,10 @@ export default defineConfig({
   // rodando em paralelo no mesmo host.
   server: {
     port: 5183,
+    // O microfone só é liberado em contexto seguro, então testar no celular exige
+    // HTTPS. O caminho suportado é o port forwarding do VS Code (Dev Tunnels);
+    // sem esta lista o Vite rejeita o Host do tunnel.
+    allowedHosts: ['.devtunnels.ms', '.ngrok-free.app', '.trycloudflare.com'],
   },
   plugins: [
     react(),
