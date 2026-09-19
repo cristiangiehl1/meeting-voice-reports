@@ -40,7 +40,7 @@ export default function App() {
 
   async function handleResetRecording() {
     if (!session) return;
-    if (audio.status === 'recording') audio.stop();
+    if (audio.status !== 'idle') audio.stop();
 
     setFlowError(null);
     setCreatingSession(true);
@@ -57,7 +57,7 @@ export default function App() {
 
   async function handleFinalize() {
     if (!session) return;
-    if (audio.status === 'recording') audio.stop();
+    if (audio.status !== 'idle') audio.stop();
 
     setFlowError(null);
     setFinalizing(true);

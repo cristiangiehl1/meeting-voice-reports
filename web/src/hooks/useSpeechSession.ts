@@ -37,11 +37,24 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const listeningRef = useRef(false);
   const startingRef = useRef(false);
   const startingSessionRef = useRef(false);
+  // stop()/reset() durante os awaits de start(): o start precisa desistir em vez de
+  // abrir uma gravação que ninguém mais pediu.
+  const abortStartRef = useRef(false);
   const restartTimeoutRef = useRef<number | null>(null);
   const restartAttemptsRef = useRef(0);
+  // O ciclo anterior terminou em erro recuperável? Se sim, `onaudiostart` não pode
+  // zerar o backoff — senão um erro que ocorre sempre depois do audiostart (rede,
+  // tipicamente) faz o teto de tentativas nunca ser alcançado e o restart vira um
+  // laço a 300ms.
+  const lastCycleErroredRef = useRef(false);
   // Mensagem a usar se as tentativas de restart se esgotarem, quando a causa
   // provável já é conhecida (microfone ocupado) e é mais útil que a genérica.
   const giveUpMessageRef = useRef<string | null>(null);
+  // Último aviso posto pela camada de reconhecimento (rede/microfone ocupado).
+  // `onaudiostart` só tem direito de limpar este — um "Falha ao salvar transcrição"
+  // precisa persistir, porque o relatório é gerado do transcript do backend e uma
+  // falha de gravação silenciosa produz relatório truncado.
+  const recoverableErrorRef = useRef<string | null>(null);
   const recognitionLiveRef = useRef(false);
   const startRecognitionRef = useRef<() => void>(() => {});
   const streamRef = useRef<MediaStream | null>(null);
@@ -136,37 +149,46 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     }
   }, []);
 
+  /** Descarta a instância atual sem encerrar a sessão. Os handlers são anulados antes
+   *  do `abort()` porque o abort dispara `onend`, que reagendaria um restart. */
+  const discardRecognition = useCallback(() => {
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    recognitionLiveRef.current = false;
+    startingRef.current = false;
+    if (!recognition) return;
+
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    recognition.onaudiostart = null;
+    recognition.onspeechstart = null;
+    recognition.onspeechend = null;
+    try {
+      recognition.abort();
+    } catch {
+      // Instância já encerrada.
+    }
+  }, []);
+
   const teardown = useCallback(() => {
     listeningRef.current = false;
     startingRef.current = false;
+    abortStartRef.current = true;
     restartAttemptsRef.current = 0;
+    lastCycleErroredRef.current = false;
     giveUpMessageRef.current = null;
+    recoverableErrorRef.current = null;
     recognitionLiveRef.current = false;
     clearRestartTimer();
 
-    const recognition = recognitionRef.current;
-    recognitionRef.current = null;
-    if (recognition) {
-      // Zerar os handlers antes de abortar: o abort dispara onend, que reagendaria
-      // um restart se o handler ainda estivesse instalado.
-      recognition.onresult = null;
-      recognition.onerror = null;
-      recognition.onend = null;
-      recognition.onaudiostart = null;
-      recognition.onspeechstart = null;
-      recognition.onspeechend = null;
-      try {
-        recognition.abort();
-      } catch {
-        // Instância já encerrada.
-      }
-    }
+    discardRecognition();
 
     releaseAudioResources();
     void wakeLockRef.current.release();
     setInterimText('');
     setIsCapturingSpeech(false);
-  }, [clearRestartTimer, releaseAudioResources]);
+  }, [clearRestartTimer, discardRecognition, releaseAudioResources]);
 
   const failWith = useCallback(
     (message: string) => {
@@ -206,6 +228,11 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     }, delay);
   }, [clearRestartTimer, failWith, showLevelMeter]);
 
+  const setRecoverableError = useCallback((message: string) => {
+    recoverableErrorRef.current = message;
+    setError(message);
+  }, []);
+
   const startRecognition = useCallback(() => {
     if (!listeningRef.current || startingRef.current || recognitionLiveRef.current) return;
 
@@ -222,6 +249,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       restartAttemptsRef.current = 0;
+      lastCycleErroredRef.current = false;
 
       let interim = '';
 
@@ -248,9 +276,11 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       // saudável. Zerar o backoff — o encerramento periódico em silêncio é normal
       // e não pode consumir o teto de tentativas.
       startingRef.current = false;
-      restartAttemptsRef.current = 0;
+      if (!lastCycleErroredRef.current) restartAttemptsRef.current = 0;
+      lastCycleErroredRef.current = false;
       giveUpMessageRef.current = null;
-      setError(null);
+      setError((current) => (current !== null && current === recoverableErrorRef.current ? null : current));
+      recoverableErrorRef.current = null;
     };
 
     recognition.onspeechstart = () => {
@@ -266,8 +296,10 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       if (event.error === 'no-speech' || event.error === 'aborted') return;
 
       if (event.error === 'network') {
-        giveUpMessageRef.current = null;
-        setError('Conexão instável com o serviço de reconhecimento. Tentando de novo...');
+        lastCycleErroredRef.current = true;
+        giveUpMessageRef.current =
+          'Não foi possível conectar ao serviço de reconhecimento de voz. Verifique sua conexão e comece a gravar de novo.';
+        setRecoverableError('Conexão instável com o serviço de reconhecimento. Tentando de novo...');
         return;
       }
 
@@ -276,12 +308,14 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         // as tracks do getUserMedia logo antes de iniciar o reconhecimento). Deixar
         // o backoff tentar de novo; se esgotar, a mensagem abaixo explica melhor
         // que a genérica.
+        lastCycleErroredRef.current = true;
         giveUpMessageRef.current = describeMicIssue('mic-busy');
-        setError('Aguardando o microfone ficar disponível...');
+        setRecoverableError('Aguardando o microfone ficar disponível...');
         return;
       }
 
       const issue = mapRecognitionError(event.error);
+      if (issue !== 'unknown') setMicStatus(blockedStatus(issue));
       failWith(issue === 'unknown' ? `O reconhecimento de voz falhou (${event.error}).` : describeMicIssue(issue));
     };
 
@@ -300,11 +334,12 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       recognition.start();
       recognitionLiveRef.current = true;
     } catch {
-      // InvalidStateError: a instância anterior ainda não encerrou de verdade.
+      // O navegador pode recusar o start (instância anterior ainda encerrando no
+      // motor, permissão em transição): deixar o backoff tentar de novo.
       startingRef.current = false;
       scheduleRestart();
     }
-  }, [failWith, scheduleRestart, showLevelMeter]);
+  }, [failWith, scheduleRestart, setRecoverableError, showLevelMeter]);
 
   useEffect(() => {
     startRecognitionRef.current = startRecognition;
@@ -317,11 +352,13 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     // guarda precisa estar aqui.
     if (startingSessionRef.current || listeningRef.current) return;
     startingSessionRef.current = true;
+    abortStartRef.current = false;
 
     try {
       setError(null);
 
       const detected = await detectMicrophone();
+      if (abortStartRef.current) return;
       setMicStatus(detected);
       if (detected.kind === 'blocked') {
         setError(detected.message);
@@ -340,6 +377,13 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         setMicStatus(blockedStatus(issue));
         setError(describeMicIssue(issue));
         setStatus('idle');
+        return;
+      }
+
+      if (abortStartRef.current) {
+        // A sessão foi encerrada enquanto o prompt de permissão estava aberto: soltar
+        // o dispositivo em vez de abrir uma gravação que ninguém pediu.
+        stream.getTracks().forEach((track) => track.stop());
         return;
       }
 
@@ -389,6 +433,18 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       // segundo plano. Ao voltar, retomar os dois sem esperar o backoff.
       void wakeLockRef.current.acquire();
       restartAttemptsRef.current = 0;
+      lastCycleErroredRef.current = false;
+
+      if (!showLevelMeter) {
+        // O mobile pode suspender a aba e matar o reconhecimento sem entregar `end`,
+        // deixando `recognitionLiveRef` preso em true — a sessão ficaria "gravando"
+        // sem capturar nada, para sempre. Forçar um ciclo limpo custa menos que
+        // confiar no ref.
+        discardRecognition();
+        clearRestartTimer();
+        startRecognitionRef.current();
+        return;
+      }
 
       if (!recognitionLiveRef.current) {
         clearRestartTimer();
@@ -398,7 +454,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [clearRestartTimer]);
+  }, [clearRestartTimer, discardRecognition, showLevelMeter]);
 
   useEffect(() => teardown, [teardown]);
 

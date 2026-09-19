@@ -111,7 +111,11 @@ export function Recorder({
           : `É preciso gravar pelo menos ${MIN_TRANSCRIPT_CHARS} caracteres de transcrição antes de gerar o relatório (atual: ${transcriptLength}).`}
       </p>
 
-      <button type="button" onClick={onFinalize} disabled={status === 'recording' || finalizing || !hasMinimumContent}>
+      <button
+        type="button"
+        onClick={onFinalize}
+        disabled={status === 'recording' || status === 'requesting' || finalizing || !hasMinimumContent}
+      >
         {finalizing ? 'Gerando relatório...' : 'Gerar relatório'}
       </button>
     </div>

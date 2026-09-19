@@ -14,15 +14,25 @@ type WakeLockNavigator = Navigator & {
  */
 export function createScreenWakeLock() {
   let sentinel: WakeLockSentinelLike | null = null;
+  // Intenção corrente: um release() que chega enquanto o request ainda está pendente
+  // não encontra sentinel para soltar. Sem este flag, o acquire tardio atribuiria o
+  // sentinel e a tela ficaria acesa depois de a gravação parar.
+  let wanted = false;
 
   async function acquire(): Promise<void> {
+    wanted = true;
     const api = (navigator as WakeLockNavigator).wakeLock;
     if (!api) return;
     if (sentinel && !sentinel.released) return;
 
     sentinel = null;
     try {
-      sentinel = await api.request('screen');
+      const acquired = await api.request('screen');
+      if (!wanted) {
+        void acquired.release().catch(() => undefined);
+        return;
+      }
+      sentinel = acquired;
     } catch {
       // Não suportado, negado, ou aba em segundo plano.
       sentinel = null;
@@ -30,6 +40,7 @@ export function createScreenWakeLock() {
   }
 
   async function release(): Promise<void> {
+    wanted = false;
     const current = sentinel;
     sentinel = null;
     if (!current || current.released) return;

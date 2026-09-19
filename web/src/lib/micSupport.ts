@@ -19,7 +19,7 @@ const ISSUE_MESSAGES: Record<MicIssue, string> = {
   'no-media-devices':
     'Este navegador não expõe acesso ao microfone. Abra o app por HTTPS em um navegador atualizado.',
   'no-speech-recognition':
-    'Este navegador não suporta reconhecimento de voz (Web Speech API). Use o Chrome no Android ou o Safari no iPhone.',
+    'Este navegador não suporta reconhecimento de voz (Web Speech API). Use o Chrome (no desktop ou no Android) ou o Safari no iPhone.',
   'ios-standalone-pwa':
     'O reconhecimento de voz não funciona no app instalado na tela de início do iPhone. Abra o mesmo endereço pelo Safari.',
   'no-audio-input':
@@ -67,6 +67,10 @@ function isStandaloneDisplay(): boolean {
  * O medidor de nível precisa segurar um MediaStream aberto, e no Android/iOS isso
  * rouba o microfone do SpeechRecognition — que então não captura nada. Só habilitar
  * onde os dois consumidores convivem (desktop).
+ *
+ *  Nota: notebooks com tela sensível ao toque caem no regime mobile por este critério.
+ *  Perdem o medidor e a retomada em aba de fundo, mas nunca perdem transcrição —
+ *  o erro é para o lado seguro.
  */
 export function supportsLevelMeter(): boolean {
   return window.matchMedia('(pointer: fine)').matches && navigator.maxTouchPoints === 0;
@@ -113,9 +117,10 @@ export async function detectMicrophone(): Promise<MicStatus> {
   if (!window.isSecureContext) return blockedStatus('insecure-context');
   if (!navigator.mediaDevices?.getUserMedia) return blockedStatus('no-media-devices');
 
-  if (!isSpeechRecognitionSupported()) {
-    return blockedStatus(isIos() && isStandaloneDisplay() ? 'ios-standalone-pwa' : 'no-speech-recognition');
-  }
+  // Num PWA instalado no iOS o construtor normalmente existe — ele só nunca produz
+  // resultado. Por isso a checagem vem antes da de suporte.
+  if (isIos() && isStandaloneDisplay()) return blockedStatus('ios-standalone-pwa');
+  if (!isSpeechRecognitionSupported()) return blockedStatus('no-speech-recognition');
 
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
