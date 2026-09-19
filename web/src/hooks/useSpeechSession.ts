@@ -3,6 +3,7 @@ import { postTranscript } from '../api/client.ts';
 import type { TranscriptChunkView } from '../api/types.ts';
 import { rmsFromTimeDomainData, rmsToLevel, classifyLevel, type AudioQuality } from '../lib/audioLevel.ts';
 import {
+  blockedStatus,
   createSpeechRecognition,
   describeMicIssue,
   detectMicrophone,
@@ -35,6 +36,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const listeningRef = useRef(false);
   const startingRef = useRef(false);
+  const startingSessionRef = useRef(false);
   const restartTimeoutRef = useRef<number | null>(null);
   const restartAttemptsRef = useRef(0);
   const startRecognitionRef = useRef<() => void>(() => {});
@@ -230,10 +232,15 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       // e não pode consumir o teto de tentativas.
       startingRef.current = false;
       restartAttemptsRef.current = 0;
+      setError(null);
     };
 
-    recognition.onspeechstart = () => setIsCapturingSpeech(true);
-    recognition.onspeechend = () => setIsCapturingSpeech(false);
+    recognition.onspeechstart = () => {
+      if (!showLevelMeter) setIsCapturingSpeech(true);
+    };
+    recognition.onspeechend = () => {
+      if (!showLevelMeter) setIsCapturingSpeech(false);
+    };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       // 'no-speech' e 'aborted' fazem parte da operação normal: o navegador encerra
@@ -266,58 +273,68 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       startingRef.current = false;
       scheduleRestart();
     }
-  }, [failWith, scheduleRestart]);
+  }, [failWith, scheduleRestart, showLevelMeter]);
 
   useEffect(() => {
     startRecognitionRef.current = startRecognition;
   }, [startRecognition]);
 
   const start = useCallback(async () => {
-    setError(null);
+    // Um segundo toque durante o await de detectMicrophone()/getUserMedia abriria
+    // um segundo MediaStream e um segundo loop de medidor, órfãos e impossíveis de
+    // parar. Nessa janela `status` ainda é 'idle' e o botão segue clicável, então a
+    // guarda precisa estar aqui.
+    if (startingSessionRef.current || listeningRef.current) return;
+    startingSessionRef.current = true;
 
-    const detected = await detectMicrophone();
-    setMicStatus(detected);
-    if (detected.kind === 'blocked') {
-      setError(detected.message);
-      return;
-    }
-
-    setStatus('requesting');
-
-    let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-    } catch (err) {
-      const issue = mapGetUserMediaError(err);
-      const message = describeMicIssue(issue);
-      setMicStatus({ kind: 'blocked', issue, message });
-      setError(message);
-      setStatus('idle');
-      return;
-    }
+      setError(null);
 
-    if (showLevelMeter) {
-      // No desktop o microfone é compartilhado entre o medidor e o reconhecimento.
-      streamRef.current = stream;
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume().catch(() => undefined);
+      const detected = await detectMicrophone();
+      setMicStatus(detected);
+      if (detected.kind === 'blocked') {
+        setError(detected.message);
+        return;
       }
-      startLevelMeter(stream, audioContext);
-    } else {
-      // Android e iOS dão acesso exclusivo ao microfone: manter este MediaStream
-      // aberto faria o SpeechRecognition não capturar absolutamente nada.
-      stream.getTracks().forEach((track) => track.stop());
-    }
 
-    listeningRef.current = true;
-    restartAttemptsRef.current = 0;
-    setStatus('recording');
-    startRecognition();
-    void wakeLockRef.current.acquire();
+      setStatus('requesting');
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+      } catch (err) {
+        const issue = mapGetUserMediaError(err);
+        setMicStatus(blockedStatus(issue));
+        setError(describeMicIssue(issue));
+        setStatus('idle');
+        return;
+      }
+
+      if (showLevelMeter) {
+        // No desktop o microfone é compartilhado entre o medidor e o reconhecimento.
+        streamRef.current = stream;
+        const audioContext = new AudioContext();
+        audioContextRef.current = audioContext;
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume().catch(() => undefined);
+        }
+        startLevelMeter(stream, audioContext);
+      } else {
+        // Android e iOS dão acesso exclusivo ao microfone: manter este MediaStream
+        // aberto faria o SpeechRecognition não capturar absolutamente nada.
+        stream.getTracks().forEach((track) => track.stop());
+      }
+
+      listeningRef.current = true;
+      restartAttemptsRef.current = 0;
+      setStatus('recording');
+      startRecognition();
+      void wakeLockRef.current.acquire();
+    } finally {
+      startingSessionRef.current = false;
+    }
   }, [showLevelMeter, startLevelMeter, startRecognition]);
 
   const stop = useCallback(() => {
