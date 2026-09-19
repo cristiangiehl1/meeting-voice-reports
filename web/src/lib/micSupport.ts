@@ -31,8 +31,28 @@ const ISSUE_MESSAGES: Record<MicIssue, string> = {
   unknown: 'Não foi possível acessar o microfone.',
 };
 
+const ISSUE_TITLES: Partial<Record<MicIssue, string>> = {
+  'ios-standalone-pwa': 'Abra pelo Safari',
+  'no-speech-recognition': 'Navegador sem reconhecimento de voz',
+  'insecure-context': 'Conexão não segura',
+  'no-media-devices': 'Conexão não segura',
+};
+
 export function describeMicIssue(issue: MicIssue): string {
   return ISSUE_MESSAGES[issue];
+}
+
+/** Nem todo bloqueio é do microfone — dizer "Microfone indisponível" quando o problema
+ *  é a origem insegura ou o navegador manda o usuário procurar no lugar errado. */
+export function micIssueTitle(issue: MicIssue): string {
+  return ISSUE_TITLES[issue] ?? 'Microfone indisponível';
+}
+
+/** Só alguns bloqueios podem mudar sem sair da página: permissão liberada, microfone
+ *  conectado, outro app fechado. Os demais exigem outra URL ou outro navegador — e um
+ *  botão "Verificar de novo" que nunca pode dar certo é pior que botão nenhum. */
+export function isRecheckable(issue: MicIssue): boolean {
+  return issue === 'permission-denied' || issue === 'no-audio-input' || issue === 'mic-busy' || issue === 'unknown';
 }
 
 export function blockedStatus(issue: MicIssue): MicStatus {

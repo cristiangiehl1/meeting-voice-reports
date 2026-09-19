@@ -16,10 +16,11 @@ O email do relatório (Resend) só sai quando o usuário clica em "Nova sessão"
 relatório — não é mais automático no `finalize`.
 
 Limitação conhecida: Web Speech API não funciona em PWA instalado na tela de início do
-iOS (funciona normalmente como aba de navegador em qualquer plataforma) — o app detecta
-esse caso e orienta a abrir pelo Safari. O microfone também só é liberado em contexto
-seguro: `http://` em IP de rede local nunca funciona, e o app avisa em vez de falhar
-em silêncio.
+iOS (funciona normalmente como aba de navegador em qualquer plataforma). O manifesto é
+montado pra evitar esse modo — ver a nota sobre `display`/`display_override` abaixo — e,
+pra quem já instalou assim, o app detecta o caso e oferece um link "Abrir no Safari". O
+microfone também só é liberado em contexto seguro: `http://` em IP de rede local nunca
+funciona, e o app avisa em vez de falhar em silêncio.
 
 ## Commands
 
@@ -152,16 +153,26 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
   (`MIN_TRANSCRIPT_CHARS`), com disclaimer abaixo do transcript explicando o motivo.
 - `LevelMeter.tsx`, `ReportTypePicker.tsx`, `ReportView.tsx` — medidor visual de
   captação e exibição do relatório final (`ReportView` é só display, sem lógica).
-- `MicStatusNotice.tsx` — aviso exibido quando `micStatus.kind === 'blocked'`, com a
-  mensagem de `micSupport.ts` e o botão "Verificar de novo". `SpeechActivityIndicator.tsx`
-  — substitui o `LevelMeter` no mobile (`!showLevelMeter`), já que ali não há RMS pra
-  mostrar.
+- `MicStatusNotice.tsx` — aviso exibido quando `micStatus.kind === 'blocked'`. Título,
+  mensagem e ações vêm todos de `micSupport.ts` e variam por `issue`: "Verificar de novo"
+  só aparece para bloqueios que podem mudar sem sair da página (`isRecheckable` — um
+  botão que nunca pode dar certo é pior que botão nenhum), e o caso de PWA no iOS ganha
+  um link "Abrir no Safari", que precisa ser âncora de verdade com `target="_blank"` pro
+  iOS escapar do modo standalone.
+- `SpeechActivityIndicator.tsx` — substitui o `LevelMeter` no mobile
+  (`!showLevelMeter`), já que ali não há RMS pra mostrar.
 - `api/client.ts` + `api/types.ts` — client HTTP fino; toda resposta do backend é
   validada com `safeParse` de um schema Zod antes de ser usada (`ApiClientError` se
   a validação ou o HTTP status falhar).
 - `lib/audioLevel.ts` — conversão de RMS em nível visual (0–1) e classificação de
   qualidade de captação (`silencio`/etc), funções puras.
-- PWA via `vite-plugin-pwa` (`vite.config.ts`), autoUpdate.
+- PWA via `vite-plugin-pwa` (`vite.config.ts`), autoUpdate. O manifesto declara
+  `display: 'browser'` com `display_override: ['standalone']`, e a ordem importa: o
+  iOS ignora `display_override` e cai no `display`, abrindo o ícone da tela de início
+  como aba do Safari — onde o STT funciona — enquanto Chrome e Edge leem o
+  `display_override` primeiro, seguem instaláveis e continuam abrindo em janela
+  própria. Inverter isso pra `display: 'standalone'` devolve o iOS ao modo em que o
+  app não transcreve nada.
 
 ### Testes
 

@@ -19,10 +19,18 @@ export default defineConfig({
       manifest: {
         name: 'Meeting Voice Reports',
         short_name: 'MV Reports',
+        // Sem isto o vite-plugin-pwa emite "lang": "en" por padrão.
+        lang: 'pt-BR',
         description: 'Ouve reuniões, entrevistas e agendamentos e gera relatórios estruturados.',
         theme_color: '#0b6bcb',
         background_color: '#f4f6f8',
-        display: 'standalone',
+        // A Web Speech API não funciona em PWA instalado na tela de início do iOS, e o
+        // app é inteiro STT — instalado em standalone ele simplesmente não serve pra
+        // nada. O iOS ignora `display_override` e cai no `display`, então abre o ícone
+        // como aba do Safari, onde funciona; Chrome e Edge leem o `display_override`
+        // primeiro, seguem instaláveis e continuam abrindo em janela própria.
+        display: 'browser',
+        display_override: ['standalone'],
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },

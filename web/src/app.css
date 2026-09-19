@@ -191,6 +191,20 @@ button.secondary {
   margin: 0;
 }
 
+/* Âncora, não botão: precisa ser um link de verdade para o iOS abrir no Safari. */
+.notice__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--focus);
+  border-radius: var(--radius);
+  background: var(--focus);
+  color: white;
+  text-decoration: none;
+}
+
 .speech-activity {
   display: flex;
   align-items: center;
@@ -238,7 +252,8 @@ button.secondary {
     align-items: stretch;
   }
 
-  button {
+  button,
+  .notice__action {
     width: 100%;
     align-self: stretch;
   }
