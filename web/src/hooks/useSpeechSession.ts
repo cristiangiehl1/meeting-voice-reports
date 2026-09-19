@@ -453,8 +453,9 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     setStatus('stopped');
   }, [teardown]);
 
-  /** Limpa a transcrição acumulada localmente. Roda sozinho quando o `sessionId`
-   *  muda; continua exposto pra descartar a gravação sem trocar de sessão. */
+  /** Limpa a transcrição acumulada localmente — só quem chama decide quando. Parar a
+   *  gravação NÃO passa por aqui: `stop()` mantém o transcript pra continuar de onde
+   *  parou ou gerar o relatório. Usar ao descartar a gravação ou trocar de sessão. */
   const reset = useCallback(() => {
     teardown();
     setTranscriptChunks([]);
@@ -494,17 +495,6 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [clearRestartTimer, discardRecognition, showLevelMeter]);
-
-  // Sessão nova é transcript novo. Antes isso dependia de todo caminho de saída
-  // lembrar de chamar reset() na mão: o que esquecesse deixava a fala da sessão
-  // anterior na tela — e sem saída, porque o botão de descartar só aparece com
-  // status 'stopped', enquanto o reset devolve o status pra 'idle'.
-  const previousSessionIdRef = useRef(sessionId);
-  useEffect(() => {
-    if (previousSessionIdRef.current === sessionId) return;
-    previousSessionIdRef.current = sessionId;
-    reset();
-  }, [sessionId, reset]);
 
   useEffect(() => teardown, [teardown]);
 

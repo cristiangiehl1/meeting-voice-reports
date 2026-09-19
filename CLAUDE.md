@@ -138,12 +138,13 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
   é estimado pelo tamanho do texto (`CHARS_PER_SECOND`), já que a Web Speech API não
   informa duração — é essa diferença que vira quebra de parágrafo em
   `lib/transcriptFlow.ts`. A origem dos tempos sobrevive a pausar/continuar e só
-  zera no `reset()`. **O hook se limpa sozinho quando o `sessionId` muda**: antes
-  isso dependia de todo caminho de saída lembrar de chamar `reset()` na mão, e quem
-  esquecesse deixava a fala da sessão anterior na tela sem saída — o botão de
-  descartar só aparece com status `'stopped'` e o `reset()` devolve o status pra
-  `'idle'`. O `key={session.id}` no `Recorder` **não** zera o transcript (ele mora
-  aqui, não no `Recorder`); só zera o cronômetro. **Android e iOS dão acesso exclusivo ao
+  zera no `reset()`. **Parar a gravação nunca apaga o transcript**: `stop()` só
+  encerra a captura e põe o status em `'stopped'` — é o que permite continuar de
+  onde parou ou gerar o relatório depois. Limpar é só via `reset()`, chamado
+  explicitamente pelo `App` ao descartar a gravação ou começar outra sessão; um
+  efeito que resetava sozinho ao ver outro `sessionId` foi removido porque apagava
+  a fala em cima do usuário. O `key={session.id}` no `Recorder` **não** zera o
+  transcript (ele mora aqui, não no `Recorder`); só zera o cronômetro. **Android e iOS dão acesso exclusivo ao
   microfone:** manter o `MediaStream` do medidor de nível aberto impedia o
   reconhecimento de capturar qualquer coisa, então no mobile as tracks do
   `getUserMedia` são paradas antes do `recognition.start()` e o medidor só existe no
