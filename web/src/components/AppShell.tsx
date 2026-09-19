@@ -3,12 +3,13 @@ import { AudioLines, Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '../lib/cn.ts';
 
-export type Step = 'pick-type' | 'session' | 'report';
+export type Step = 'pick-type' | 'session' | 'report' | 'email';
 
 const STEPS: { id: Step; label: string; short: string }[] = [
   { id: 'pick-type', label: 'Tipo de sessão', short: 'Tipo' },
   { id: 'session', label: 'Gravação', short: 'Gravação' },
   { id: 'report', label: 'Relatório', short: 'Relatório' },
+  { id: 'email', label: 'Envio', short: 'Envio' },
 ];
 
 /** Gradiente de malha do fundo. Três manchas de cor sob blur pesado — animadas com
@@ -71,7 +72,9 @@ function Stepper({ current }: { current: Step }) {
                 {done ? <Check aria-hidden className="size-2.5" strokeWidth={3} /> : index + 1}
               </span>
               <span className="relative hidden sm:inline">{step.label}</span>
-              <span className="relative sm:hidden">{step.short}</span>
+              {/* Com quatro passos, os rótulos todos não cabem num celular estreito —
+                  no mobile só o passo atual se identifica. */}
+              <span className={cn('relative sm:hidden', !active && 'hidden')}>{step.short}</span>
             </div>
             {index < STEPS.length - 1 ? (
               <span

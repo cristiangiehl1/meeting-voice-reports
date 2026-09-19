@@ -12,8 +12,8 @@ Fluxo: cliente web (PWA) → Web Speech API (STT nativo do navegador, roda 100% 
 cliente, grátis) → `POST /sessions/:id/transcript` a cada trecho final reconhecido →
 `POST /sessions/:id/finalize` → LangGraph (1 node `generateReport`) roda extração
 estruturada via LLM → relatório salvo e devolvido (schema Zod varia por `reportType`).
-O email do relatório (Resend) só sai quando o usuário clica em "Nova sessão" na tela do
-relatório — não é mais automático no `finalize`.
+O email do relatório (Resend) sai numa etapa própria depois do relatório, onde o usuário
+informa os destinatários — não é automático no `finalize`, e dá pra pular.
 
 Limitação conhecida: Web Speech API não funciona em PWA instalado na tela de início do
 iOS (funciona normalmente como aba de navegador em qualquer plataforma). O manifesto é
@@ -66,11 +66,17 @@ Não há linter/formatter configurado no backend (raiz) — só no `web/` (oxlin
   `POST /sessions/:id/transcript`, `POST /sessions/:id/finalize`,
   `POST /reports/:id/email`. Aceita `ServerDeps` (sessionService/reportService/
   emailService) para injeção em testes. O email é disparado só quando o frontend
-  chama `/reports/:id/email` explicitamente (botão "Nova sessão"), não no `finalize`.
+  chama `/reports/:id/email` explicitamente (etapa de envio), não no `finalize`.
+  O `to` do corpo é validado por schema no servidor — vem do cliente e vira chamada ao
+  provider. O corpo aceita `null` no tipo porque um POST sem corpo continua válido e
+  significa "manda só pro destinatário padrão".
 - `services/emailService.ts` — `EmailService` (Resend real) e `StubEmailService`
   (no-op, usado em testes), ambos implementando a interface `EmailSender`. Sem
   idempotency key — é um envio manual disparado pelo usuário, não uma chamada
-  automática que precise de proteção contra retry duplicado.
+  automática que precise de proteção contra retry duplicado. `composeRecipients` é
+  pura e junta os destinatários pedidos com o `REPORT_EMAIL_TO`, que vai sempre junto
+  como cópia de arquivo; a deduplicação é case-insensitive pra digitar o mesmo
+  endereço com outra caixa não render duas cópias.
 - `emails/reportEmailTemplate.ts` — `buildReportEmailHtml`/`buildReportEmailSubject`,
   funções puras que renderizam o `report.data` (objeto genérico) em uma tabela HTML
   com escape de conteúdo (o texto vem de LLM/transcript, tratado como não-confiável).
@@ -165,6 +171,13 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
 - `components/TranscriptPanel.tsx` — transcript com entrada animada por chunk, interim
   em itálico com cursor e auto-scroll. O mínimo de caracteres aparece como anel de
   progresso.
+- `components/EmailDelivery.tsx` — etapa de envio. Campo único aceitando vários
+  endereços separados por vírgula, que viram chips removíveis; a validação só aparece
+  depois da primeira tentativa de envio, porque apontar erro enquanto a pessoa digita
+  o primeiro endereço é ruído.
+- `lib/recipients.ts` — parsing/validação dos endereços e persistência do último
+  destinatário em localStorage (as leituras e escritas são protegidas: o Safari em
+  navegação privada lança ao acessar o localStorage).
 - `components/FinalizingOverlay.tsx` — overlay durante o `finalize`. Os passos são
   indicativos: o backend não reporta progresso. O avanço vive num componente interno
   que só monta com o overlay aberto, então cada finalize recomeça do primeiro passo

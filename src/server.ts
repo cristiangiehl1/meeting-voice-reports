@@ -83,26 +83,53 @@ export const createServer = (deps: ServerDeps = {}) => {
     }
   });
 
-  app.post('/reports/:id/email', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const report = reportService.get(id);
+  app.post(
+    '/reports/:id/email',
+    {
+      schema: {
+        body: {
+          // `null` entra na união porque um POST sem corpo é uma chamada válida:
+          // significa "manda só pro destinatário padrão".
+          type: ['object', 'null'],
+          properties: {
+            to: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 10,
+              items: {
+                type: 'string',
+                // Validação de endereço no servidor: o `to` vem do cliente e vira
+                // chamada ao provider. Formato pragmático (sem tentar cobrir a RFC),
+                // só o bastante pra barrar o que nunca poderia ser entregue.
+                pattern: '^[^@\\s,]+@[^@\\s,.]+(\\.[^@\\s,.]+)+$',
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { to } = (request.body ?? {}) as { to?: string[] };
+      const report = reportService.get(id);
 
-    if (!report) {
-      return reply.status(404).send({ error: 'Relatório não encontrado' });
-    }
+      if (!report) {
+        return reply.status(404).send({ error: 'Relatório não encontrado' });
+      }
 
-    try {
-      const html = buildReportEmailHtml(report.reportType, report.data);
-      const subject = buildReportEmailSubject(report.reportType);
-      await emailService.sendReportEmail(subject, html);
-      return reply.status(200).send({ sent: true });
-    } catch (error) {
-      request.log.error(error, 'Falha ao enviar email do relatório');
-      return reply.status(500).send({
-        error: error instanceof Error ? error.message : 'Falha ao enviar email do relatório',
-      });
-    }
-  });
+      try {
+        const html = buildReportEmailHtml(report.reportType, report.data);
+        const subject = buildReportEmailSubject(report.reportType);
+        await emailService.sendReportEmail(subject, html, to);
+        return reply.status(200).send({ sent: true });
+      } catch (error) {
+        request.log.error(error, 'Falha ao enviar email do relatório');
+        return reply.status(500).send({
+          error: error instanceof Error ? error.message : 'Falha ao enviar email do relatório',
+        });
+      }
+    },
+  );
 
   return app;
 };

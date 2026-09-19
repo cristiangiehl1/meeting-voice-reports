@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Toaster, toast } from 'sonner';
-import { Sparkles } from 'lucide-react';
+import { Mail } from 'lucide-react';
 import { ApiClientError, createSession, finalizeSession, sendReportEmail } from './api/client.ts';
 import { loadApiBaseUrl } from './api/config.ts';
 import type { ReportType, SessionView, StoredReportView } from './api/types.ts';
@@ -11,6 +11,8 @@ import { Recorder } from './components/Recorder.tsx';
 import { MicStatusNotice } from './components/MicStatusNotice.tsx';
 import { ReportView } from './components/ReportView.tsx';
 import { FinalizingOverlay } from './components/FinalizingOverlay.tsx';
+import { EmailDelivery } from './components/EmailDelivery.tsx';
+import { saveLastRecipients } from './lib/recipients.ts';
 import { Button } from './components/ui/Button.tsx';
 
 export default function App() {
@@ -75,21 +77,29 @@ export default function App() {
     }
   }
 
-  async function handleReset() {
-    if (audio.status !== 'idle') audio.stop();
+  async function handleSendEmail(recipients: string[]) {
+    if (!report) return;
 
-    if (report) {
-      setSendingEmail(true);
-      try {
-        await sendReportEmail(apiBaseUrl, report.id);
-        toast.success('Relatório enviado por email.');
-      } catch (error) {
-        console.error('Falha ao enviar email do relatório', error);
-        toast.error('O relatório não pôde ser enviado por email.');
-      } finally {
-        setSendingEmail(false);
-      }
+    setSendingEmail(true);
+    try {
+      await sendReportEmail(apiBaseUrl, report.id, recipients);
+      saveLastRecipients(recipients.join(', '));
+      toast.success(
+        recipients.length === 1
+          ? `Relatório enviado para ${recipients[0]}.`
+          : `Relatório enviado para ${recipients.length} destinatários.`,
+      );
+      startNewSession();
+    } catch (error) {
+      reportFlowError(error, 'O relatório não pôde ser enviado por email');
+    } finally {
+      setSendingEmail(false);
     }
+  }
+
+  /** Volta pro começo descartando a sessão e o relatório atuais. */
+  function startNewSession() {
+    if (audio.status !== 'idle') audio.stop();
 
     audio.reset();
     setSession(null);
@@ -135,17 +145,23 @@ export default function App() {
         {step === 'report' && report ? (
           <>
             <ReportView report={report} />
-            <div className="flex justify-end pt-2">
-              <Button
-                size="lg"
-                onClick={() => void handleReset()}
-                loading={sendingEmail}
-                icon={sendingEmail ? undefined : <Sparkles className="size-4" />}
-              >
-                {sendingEmail ? 'Enviando email' : 'Nova sessão'}
+            <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-end">
+              <Button variant="ghost" size="sm" onClick={startNewSession}>
+                Descartar e começar nova sessão
+              </Button>
+              <Button size="lg" onClick={() => setStep('email')} icon={<Mail className="size-4" />}>
+                Enviar por email
               </Button>
             </div>
           </>
+        ) : null}
+
+        {step === 'email' && report ? (
+          <EmailDelivery
+            onSend={(recipients) => void handleSendEmail(recipients)}
+            onSkip={startNewSession}
+            sending={sendingEmail}
+          />
         ) : null}
       </AppShell>
 

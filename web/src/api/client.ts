@@ -69,9 +69,11 @@ export async function finalizeSession(baseUrl: string, sessionId: string): Promi
   return parsed.data;
 }
 
-export async function sendReportEmail(baseUrl: string, reportId: string): Promise<void> {
+export async function sendReportEmail(baseUrl: string, reportId: string, to: string[]): Promise<void> {
   const response = await fetch(joinBase(baseUrl, `/reports/${reportId}/email`), {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to }),
   });
 
   if (response.status !== 200) {
