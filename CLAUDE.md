@@ -90,8 +90,18 @@ Não há linter/formatter configurado no backend (raiz) — só no `web/` (oxlin
 - `services/openRouterService.ts` — client LLM via `ChatOpenAI` (langchain) apontado
   pra API da OpenRouter (`baseURL` custom). Usa `createAgent` + `providerStrategy(schema)`
   do pacote `langchain` para forçar saída estruturada validada pelo schema Zod.
+- `lib/transcriptFlow.ts` — `buildFlowingTranscript`/`groupIntoParagraphs`, puras.
+  Cada resultado final da Web Speech API chega picado e sem pontuação ("top", "vai
+  gravando"); juntar com `\n` entregava ao LLM uma lista de fragmentos, enquanto os
+  few-shot dos prompts usam prosa corrida. Aqui os trechos viram parágrafos: emenda
+  com espaço, completa a pontuação que falta e só quebra parágrafo quando houve
+  `PARAGRAPH_GAP_MS` (3s) de silêncio ou o falante mudou. Sem marcação de tempo
+  (`startMs`/`endMs` zerados) a diferença dá 0 e tudo cai num parágrafo único — o
+  pior caso aceitável, nunca a lista de antes. Espelhado em
+  `web/src/lib/transcriptFlow.ts`, que agrupa igual pra exibir; mudam juntos.
 - `services/sessionService.ts` — sessões e transcript acumulado em memória (`Map`,
-  sem persistência — reinicia o processo, perde tudo). IDs são `crypto.randomUUID()`
+  sem persistência — reinicia o processo, perde tudo). `getFullTranscript` devolve o
+  texto já agrupado por `lib/transcriptFlow.ts`. IDs são `crypto.randomUUID()`
   (não sequenciais — um contador reiniciando a cada restart do processo já causou
   colisão de idempotency key no Resend quando dois relatórios diferentes pegaram
   o mesmo id "1" em processos diferentes).
@@ -123,7 +133,17 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
 - `hooks/useSpeechSession.ts` — todo o STT roda aqui: `SpeechRecognition` nativo do
   navegador (`window.SpeechRecognition ?? window.webkitSpeechRecognition`). Cada
   resultado final é enviado (`postTranscript`) imediatamente pro backend; resultados
-  interinos só atualizam estado local. **Android e iOS dão acesso exclusivo ao
+  interinos só atualizam estado local. Cada trecho final é carimbado por
+  `stampChunk()`: o fim é o instante em que o resultado chegou (confiável), o começo
+  é estimado pelo tamanho do texto (`CHARS_PER_SECOND`), já que a Web Speech API não
+  informa duração — é essa diferença que vira quebra de parágrafo em
+  `lib/transcriptFlow.ts`. A origem dos tempos sobrevive a pausar/continuar e só
+  zera no `reset()`. **O hook se limpa sozinho quando o `sessionId` muda**: antes
+  isso dependia de todo caminho de saída lembrar de chamar `reset()` na mão, e quem
+  esquecesse deixava a fala da sessão anterior na tela sem saída — o botão de
+  descartar só aparece com status `'stopped'` e o `reset()` devolve o status pra
+  `'idle'`. O `key={session.id}` no `Recorder` **não** zera o transcript (ele mora
+  aqui, não no `Recorder`); só zera o cronômetro. **Android e iOS dão acesso exclusivo ao
   microfone:** manter o `MediaStream` do medidor de nível aberto impedia o
   reconhecimento de capturar qualquer coisa, então no mobile as tracks do
   `getUserMedia` são paradas antes do `recognition.start()` e o medidor só existe no
@@ -168,9 +188,11 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
   `audioLevel`; no mobile (`!showLevelMeter`, sem RMS disponível) desenha um orbe
   pulsante ligado a `isCapturingSpeech`, e a legenda fala de atividade de fala em vez
   de qualidade de captação — prometer "captando bem" sem medir seria mentira.
-- `components/TranscriptPanel.tsx` — transcript com entrada animada por chunk, interim
-  em itálico com cursor e auto-scroll. O mínimo de caracteres aparece como anel de
-  progresso.
+- `components/TranscriptPanel.tsx` — transcript em parágrafos (`lib/transcriptFlow.ts`),
+  não uma linha por trecho: a fala reconhecida chega em fragmentos de poucas palavras e
+  empilhá-los não parece conversa. O interim continua o último parágrafo em itálico, em
+  vez de abrir um item novo — é a mesma frase, ainda sendo reconhecida. Auto-scroll, e o
+  mínimo de caracteres aparece como anel de progresso.
 - `components/EmailDelivery.tsx` — etapa de envio. Campo único aceitando vários
   endereços separados por vírgula, que viram chips removíveis; a validação só aparece
   depois da primeira tentativa de envio, porque apontar erro enquanto a pessoa digita

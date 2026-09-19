@@ -45,13 +45,20 @@ export const createServer = (deps: ServerDeps = {}) => {
 
   app.post('/sessions/:id/transcript', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { text, speaker } = request.body as { text: string; speaker?: string };
+    const { text, speaker, startMs, endMs } = request.body as {
+      text: string;
+      speaker?: string;
+      startMs?: number;
+      endMs?: number;
+    };
 
+    // Os tempos são o que permite agrupar o transcript em parágrafos por pausa.
+    // Clientes antigos não os mandam: 0/0 degrada para um parágrafo único.
     const session = sessionService.appendTranscript(id, {
       text,
       speaker,
-      startMs: 0,
-      endMs: 0,
+      startMs: startMs ?? 0,
+      endMs: endMs ?? 0,
     });
 
     return reply.status(201).send(session);

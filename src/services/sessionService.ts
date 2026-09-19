@@ -1,4 +1,5 @@
 import type { ReportType } from '../schemas/index.ts';
+import { buildFlowingTranscript } from '../lib/transcriptFlow.ts';
 
 export type TranscriptChunk = {
   text: string;
@@ -56,8 +57,6 @@ export class SessionService {
     if (!session) {
       throw new Error(`Sessão não encontrada: ${sessionId}`);
     }
-    return session.chunks
-      .map((chunk) => (chunk.speaker ? `${chunk.speaker}: ${chunk.text}` : chunk.text))
-      .join('\n');
+    return buildFlowingTranscript(session.chunks);
   }
 }

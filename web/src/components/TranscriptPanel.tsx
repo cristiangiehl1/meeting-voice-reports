@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { TranscriptChunkView } from '../api/types.ts';
 import { cn } from '../lib/cn.ts';
+import { groupIntoParagraphs } from '../lib/transcriptFlow.ts';
 
 /** Anel que mostra o quanto falta do mínimo de transcrição exigido pra gerar o
  *  relatório. Substitui a frase com contagem de caracteres. */
@@ -50,6 +51,7 @@ export function TranscriptPanel({ chunks, interimText, charCount, minChars }: Pr
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasContent = chunks.length > 0 || interimText.length > 0;
   const complete = charCount >= minChars;
+  const paragraphs = useMemo(() => groupIntoParagraphs(chunks), [chunks]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -82,37 +84,35 @@ export function TranscriptPanel({ chunks, interimText, charCount, minChars }: Pr
             A transcrição aparece aqui conforme você fala.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2.5">
+          // Parágrafos, não uma linha por trecho: a fala reconhecida chega picada em
+          // fragmentos de poucas palavras e lê-los empilhados não parece conversa.
+          <div className="flex flex-col gap-3.5">
             <AnimatePresence initial={false}>
-              {chunks.map((chunk, index) => (
-                <motion.li
-                  key={`${index}-${chunk.startMs}`}
+              {paragraphs.map((paragraph) => (
+                <motion.p
+                  key={paragraph.key}
                   initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
                   animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                   transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-                  className="flex gap-3 text-[0.94rem] leading-relaxed"
+                  className="text-[0.94rem] leading-relaxed text-pretty"
                 >
-                  <span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-accent/50" />
-                  <span className="text-pretty">
-                    {chunk.speaker ? <strong className="font-semibold text-accent">{chunk.speaker}: </strong> : null}
-                    {chunk.text}
-                  </span>
-                </motion.li>
+                  {paragraph.speaker ? (
+                    <strong className="font-semibold text-accent">{paragraph.speaker}: </strong>
+                  ) : null}
+                  {paragraph.text}
+                  {/* O interim continua o último parágrafo em vez de abrir um item
+                      novo — é a mesma frase, ainda sendo reconhecida. */}
+                  {interimText && paragraph === paragraphs[paragraphs.length - 1] ? (
+                    <span className="text-muted italic"> {interimText}</span>
+                  ) : null}
+                </motion.p>
               ))}
             </AnimatePresence>
 
-            {interimText ? (
-              <li className="flex gap-3 text-[0.94rem] leading-relaxed text-muted italic">
-                <span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-line-strong" />
-                <span className="text-pretty">
-                  {interimText}
-                  <span aria-hidden className="ml-0.5 inline-block w-px animate-[caret_1s_steps(1)_infinite] align-middle">
-                    <span className="inline-block h-[1.1em] w-[2px] translate-y-[0.15em] bg-accent" />
-                  </span>
-                </span>
-              </li>
+            {interimText && paragraphs.length === 0 ? (
+              <p className="text-[0.94rem] leading-relaxed text-muted italic text-pretty">{interimText}</p>
             ) : null}
-          </ul>
+          </div>
         )}
       </div>
     </div>

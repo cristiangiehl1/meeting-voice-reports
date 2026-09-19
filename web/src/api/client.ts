@@ -37,11 +37,19 @@ export async function createSession(baseUrl: string, reportType: ReportType): Pr
   return parsed.data;
 }
 
-export async function postTranscript(baseUrl: string, sessionId: string, text: string, speaker?: string): Promise<void> {
+/** `timing` é o que permite ao backend agrupar o transcript em parágrafos por pausa
+ *  em vez de entregar uma linha por trecho ao LLM. */
+export async function postTranscript(
+  baseUrl: string,
+  sessionId: string,
+  text: string,
+  speaker?: string,
+  timing?: { startMs: number; endMs: number },
+): Promise<void> {
   const response = await fetch(joinBase(baseUrl, `/sessions/${sessionId}/transcript`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, speaker }),
+    body: JSON.stringify({ text, speaker, ...timing }),
   });
 
   if (response.status !== 201) {

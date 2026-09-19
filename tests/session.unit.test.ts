@@ -12,7 +12,8 @@ describe('SessionService', () => {
 
     const transcript = service.getFullTranscript(session.id);
 
-    assert.equal(transcript, 'Ana: Bom dia pessoal\nAna: Vamos começar');
+    // Texto corrido, não uma linha por trecho: ver `lib/transcriptFlow.ts`.
+    assert.equal(transcript, 'Ana: Bom dia pessoal. Vamos começar.');
   });
 
   it('lança erro ao referenciar uma sessão inexistente', () => {

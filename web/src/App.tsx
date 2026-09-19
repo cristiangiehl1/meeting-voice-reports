@@ -123,7 +123,8 @@ export default function App() {
 
         {step === 'session' && session ? (
           <Recorder
-            // Remontar por sessão zera o cronômetro de gravação junto com o transcript.
+            // Remontar por sessão zera o cronômetro de gravação. O transcript não vem
+            // daqui — mora no useSpeechSession, que se limpa sozinho ao ver outro id.
             key={session.id}
             status={audio.status}
             transcriptChunks={audio.transcriptChunks}

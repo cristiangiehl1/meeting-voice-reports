@@ -21,6 +21,8 @@ const SPEECH_RMS_THRESHOLD = 0.01;
 const RESTART_BASE_DELAY_MS = 300;
 const RESTART_MAX_DELAY_MS = 5000;
 const MAX_RESTART_ATTEMPTS = 8;
+/** Ritmo de fala aproximado em PT-BR, usado só pra estimar quanto durou um trecho. */
+const CHARS_PER_SECOND = 14;
 
 export function useSpeechSession(baseUrl: string, sessionId: string) {
   const [status, setStatus] = useState<RecordingStatus>('idle');
@@ -68,10 +70,33 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
   const baseUrlRef = useRef(baseUrl);
   const sessionIdRef = useRef(sessionId);
 
+  // Origem dos tempos da sessão: sobrevive a pausar/continuar, pra que o silêncio
+  // entre um trecho e outro seja medido de verdade. Zerado só no reset().
+  const sessionOriginRef = useRef<number | null>(null);
+  const lastChunkEndRef = useRef(0);
+
   useEffect(() => {
     baseUrlRef.current = baseUrl;
     sessionIdRef.current = sessionId;
   }, [baseUrl, sessionId]);
+
+  /**
+   * A Web Speech API não informa a duração da fala — só entrega o resultado quando
+   * a frase termina. O fim é confiável (é agora); o começo é estimado pelo tamanho
+   * do texto, o bastante pra distinguir "continuou falando" de "ficou em silêncio",
+   * que é o que decide a quebra de parágrafo em `lib/transcriptFlow.ts`.
+   */
+  const stampChunk = useCallback((text: string) => {
+    const now = Date.now();
+    if (sessionOriginRef.current === null) sessionOriginRef.current = now;
+
+    const endMs = now - sessionOriginRef.current;
+    const spokenMs = Math.round((text.length / CHARS_PER_SECOND) * 1000);
+    const startMs = Math.min(endMs, Math.max(lastChunkEndRef.current, endMs - spokenMs));
+    lastChunkEndRef.current = endMs;
+
+    return { startMs, endMs };
+  }, []);
 
   const refreshMicStatus = useCallback(async () => {
     setMicStatus(await detectMicrophone());
@@ -259,8 +284,9 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
         if (!text) continue;
 
         if (result.isFinal) {
-          setTranscriptChunks((prev) => [...prev, { text, startMs: 0, endMs: 0 }]);
-          void postTranscript(baseUrlRef.current, sessionIdRef.current, text).catch((err) => {
+          const timing = stampChunk(text);
+          setTranscriptChunks((prev) => [...prev, { text, ...timing }]);
+          void postTranscript(baseUrlRef.current, sessionIdRef.current, text, undefined, timing).catch((err) => {
             setError(err instanceof Error ? err.message : 'Falha ao salvar transcrição');
           });
         } else {
@@ -343,7 +369,7 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
       startingRef.current = false;
       scheduleRestart();
     }
-  }, [failWith, scheduleRestart, setRecoverableError, showLevelMeter]);
+  }, [failWith, scheduleRestart, setRecoverableError, showLevelMeter, stampChunk]);
 
   useEffect(() => {
     startRecognitionRef.current = startRecognition;
@@ -427,12 +453,15 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     setStatus('stopped');
   }, [teardown]);
 
-  /** Limpa a transcrição acumulada localmente — usar ao trocar de sessão ou começar do zero. */
+  /** Limpa a transcrição acumulada localmente. Roda sozinho quando o `sessionId`
+   *  muda; continua exposto pra descartar a gravação sem trocar de sessão. */
   const reset = useCallback(() => {
     teardown();
     setTranscriptChunks([]);
     setError(null);
     setStatus('idle');
+    sessionOriginRef.current = null;
+    lastChunkEndRef.current = 0;
   }, [teardown]);
 
   useEffect(() => {
@@ -465,6 +494,17 @@ export function useSpeechSession(baseUrl: string, sessionId: string) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [clearRestartTimer, discardRecognition, showLevelMeter]);
+
+  // Sessão nova é transcript novo. Antes isso dependia de todo caminho de saída
+  // lembrar de chamar reset() na mão: o que esquecesse deixava a fala da sessão
+  // anterior na tela — e sem saída, porque o botão de descartar só aparece com
+  // status 'stopped', enquanto o reset devolve o status pra 'idle'.
+  const previousSessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    if (previousSessionIdRef.current === sessionId) return;
+    previousSessionIdRef.current = sessionId;
+    reset();
+  }, [sessionId, reset]);
 
   useEffect(() => teardown, [teardown]);
 
