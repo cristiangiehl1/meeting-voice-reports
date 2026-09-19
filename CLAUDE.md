@@ -16,7 +16,10 @@ O email do relatório (Resend) só sai quando o usuário clica em "Nova sessão"
 relatório — não é mais automático no `finalize`.
 
 Limitação conhecida: Web Speech API não funciona em PWA instalado na tela de início do
-iOS (funciona normalmente como aba de navegador em qualquer plataforma).
+iOS (funciona normalmente como aba de navegador em qualquer plataforma) — o app detecta
+esse caso e orienta a abrir pelo Safari. O microfone também só é liberado em contexto
+seguro: `http://` em IP de rede local nunca funciona, e o app avisa em vez de falhar
+em silêncio.
 
 ## Commands
 
@@ -42,6 +45,11 @@ npm run dev                # localhost:5183
 npm run build               # tsc -b + vite build
 npm run typecheck           # tsc -b --pretty false
 npm run lint                # oxlint
+
+# Testar no celular: o microfone exige HTTPS, então http://<ip-da-lan>:5183 não serve.
+# Use o port forwarding do VS Code (Dev Tunnels): encaminhe 5183 e 4310, marque as
+# duas como Public (em Private o celular cai no login do GitHub e o fetch falha) e
+# aponte VITE_API_BASE_URL para a URL do tunnel da 4310.
 ```
 Sem camada de testes no frontend (removida deliberadamente) — só typecheck + lint.
 
@@ -104,14 +112,39 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
 - `App.tsx` — tela única, orquestra picker de tipo de relatório → gravação → view do
   relatório.
 - `hooks/useSpeechSession.ts` — todo o STT roda aqui: `SpeechRecognition` nativo do
-  navegador (`window.SpeechRecognition ?? window.webkitSpeechRecognition`) mais um
-  medidor de nível de áudio via Web Audio API (`AnalyserNode` + RMS). Cada resultado
-  final do reconhecimento é enviado (`postTranscript`) imediatamente pro backend;
-  resultados interinos só atualizam estado local. `onend` reinicia o reconhecimento
-  automaticamente enquanto `listeningRef` estiver true (o navegador encerra sozinho
-  periodicamente). Expõe `reset()` pra limpar transcript/status locais — precisa ser
+  navegador (`window.SpeechRecognition ?? window.webkitSpeechRecognition`). Cada
+  resultado final é enviado (`postTranscript`) imediatamente pro backend; resultados
+  interinos só atualizam estado local. **Android e iOS dão acesso exclusivo ao
+  microfone:** manter o `MediaStream` do medidor de nível aberto impedia o
+  reconhecimento de capturar qualquer coisa, então no mobile as tracks do
+  `getUserMedia` são paradas antes do `recognition.start()` e o medidor só existe no
+  desktop (`supportsLevelMeter()`). `start()` tem guarda de reentrância
+  (`startingSessionRef`): um duplo-toque no botão durante o `await` da detecção
+  abriria um segundo `MediaStream` e um segundo loop de medidor, órfãos. O `onend`
+  reinicia via `scheduleRestart()` com backoff exponencial (300ms→5s) e teto de 8
+  tentativas consecutivas — reiniciar direto no handler, como era antes, virava laço
+  infinito e congelava a aba quando o microfone estava indisponível. O contador zera
+  em `onaudiostart`, que é o sinal de que a captura realmente começou (o encerramento
+  periódico em silêncio é normal e não pode consumir o teto). O erro `audio-capture`
+  é tratado como recuperável, não fatal: no Android o dispositivo pode ainda não ter
+  sido liberado entre o `stop()` das tracks e o `recognition.start()`, e é essa janela
+  que o backoff cobre; se as tentativas se esgotarem, entra a mensagem de "microfone
+  ocupado" no lugar da genérica. Restarts em segundo plano são suprimidos só no
+  regime mobile (`!showLevelMeter`) — no desktop a aba transcreve normalmente em
+  background, então restringir ali abriria um buraco silencioso ao trocar de aba no
+  notebook. `recognitionLiveRef` rastreia se existe instância de reconhecimento viva
+  e é o que permite ao handler de `visibilitychange` retomar sem criar uma segunda
+  instância. Mantém wake lock de tela enquanto grava e força restart ao voltar do
+  segundo plano. Expõe `reset()` pra limpar transcript/status locais — precisa ser
   chamado manualmente ao trocar/descartar sessão, já que o hook não reseta sozinho só
   porque o `sessionId` prop mudou.
+- `lib/micSupport.ts` — detecção de capacidade do dispositivo (`detectMicrophone()`,
+  rodando na montagem e em `devicechange`) e tradução de erros de `getUserMedia`/
+  `SpeechRecognition` em mensagens acionáveis em PT-BR. Cobre contexto inseguro,
+  ausência de `mediaDevices`, Web Speech API ausente (com mensagem específica de PWA
+  no iOS), nenhum `audioinput` e permissão já negada.
+- `lib/wakeLock.ts` — wrapper do Screen Wake Lock; sem ele a tela do celular apaga
+  durante a reunião e a captura morre.
 - `components/Recorder.tsx` — controles de gravação. Quando parado com transcript
   acumulado, mostra "Continuar gravação" (retoma, mantém o que já foi dito) e
   "Resetar e começar do zero" (cria uma sessão nova via `onReset`, descarta tudo).
@@ -119,6 +152,10 @@ Alternativas: `openai/gpt-5-nano`, `deepseek/deepseek-v4.1-flash`; free para pro
   (`MIN_TRANSCRIPT_CHARS`), com disclaimer abaixo do transcript explicando o motivo.
 - `LevelMeter.tsx`, `ReportTypePicker.tsx`, `ReportView.tsx` — medidor visual de
   captação e exibição do relatório final (`ReportView` é só display, sem lógica).
+- `MicStatusNotice.tsx` — aviso exibido quando `micStatus.kind === 'blocked'`, com a
+  mensagem de `micSupport.ts` e o botão "Verificar de novo". `SpeechActivityIndicator.tsx`
+  — substitui o `LevelMeter` no mobile (`!showLevelMeter`), já que ali não há RMS pra
+  mostrar.
 - `api/client.ts` + `api/types.ts` — client HTTP fino; toda resposta do backend é
   validada com `safeParse` de um schema Zod antes de ser usada (`ApiClientError` se
   a validação ou o HTTP status falhar).
