@@ -2,6 +2,7 @@ import type { RecordingStatus } from '../hooks/useSpeechSession.ts';
 import type { TranscriptChunkView } from '../api/types.ts';
 import type { AudioQuality } from '../lib/audioLevel.ts';
 import { LevelMeter } from './LevelMeter.tsx';
+import { SpeechActivityIndicator } from './SpeechActivityIndicator.tsx';
 
 const MIN_TRANSCRIPT_CHARS = 30;
 
@@ -13,6 +14,8 @@ type Props = {
   audioLevel: number;
   audioQuality: AudioQuality;
   isCapturingSpeech: boolean;
+  micBlocked: boolean;
+  showLevelMeter: boolean;
   onStart: () => void;
   onStop: () => void;
   onReset: () => void;
@@ -28,6 +31,8 @@ export function Recorder({
   audioLevel,
   audioQuality,
   isCapturingSpeech,
+  micBlocked,
+  showLevelMeter,
   onStart,
   onStop,
   onReset,
@@ -44,14 +49,14 @@ export function Recorder({
 
       <div className="recorder-controls">
         {status === 'idle' ? (
-          <button type="button" onClick={onStart}>
+          <button type="button" onClick={onStart} disabled={micBlocked}>
             Começar a gravar
           </button>
         ) : null}
 
         {hasExistingRecording ? (
           <>
-            <button type="button" onClick={onStart}>
+            <button type="button" onClick={onStart} disabled={micBlocked}>
               Continuar gravação
             </button>
             <button type="button" className="secondary" onClick={onReset}>
@@ -61,7 +66,7 @@ export function Recorder({
         ) : null}
 
         {status === 'stopped' && transcriptChunks.length === 0 ? (
-          <button type="button" onClick={onStart}>
+          <button type="button" onClick={onStart} disabled={micBlocked}>
             Começar a gravar
           </button>
         ) : null}
@@ -75,7 +80,11 @@ export function Recorder({
       </div>
 
       {status === 'recording' ? (
-        <LevelMeter level={audioLevel} quality={audioQuality} isCapturingSpeech={isCapturingSpeech} />
+        showLevelMeter ? (
+          <LevelMeter level={audioLevel} quality={audioQuality} isCapturingSpeech={isCapturingSpeech} />
+        ) : (
+          <SpeechActivityIndicator isCapturingSpeech={isCapturingSpeech} hasInterimText={interimText.length > 0} />
+        )
       ) : null}
 
       {error ? <p className="error">{error}</p> : null}

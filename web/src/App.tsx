@@ -5,6 +5,7 @@ import type { ReportType, SessionView, StoredReportView } from './api/types.ts';
 import { useSpeechSession } from './hooks/useSpeechSession.ts';
 import { ReportTypePicker } from './components/ReportTypePicker.tsx';
 import { Recorder } from './components/Recorder.tsx';
+import { MicStatusNotice } from './components/MicStatusNotice.tsx';
 import { ReportView } from './components/ReportView.tsx';
 import './app.css';
 
@@ -103,6 +104,8 @@ export default function App() {
       <main className="app__main">
         {flowError ? <p className="error">{flowError}</p> : null}
 
+        <MicStatusNotice status={audio.micStatus} onRecheck={audio.refreshMicStatus} />
+
         {step === 'pick-type' ? (
           <ReportTypePicker value={reportType} onChange={setReportType} onStart={handleStartSession} busy={creatingSession} />
         ) : null}
@@ -116,6 +119,8 @@ export default function App() {
             audioLevel={audio.audioLevel}
             audioQuality={audio.audioQuality}
             isCapturingSpeech={audio.isCapturingSpeech}
+            micBlocked={audio.micStatus.kind === 'blocked'}
+            showLevelMeter={audio.showLevelMeter}
             onStart={audio.start}
             onStop={audio.stop}
             onReset={handleResetRecording}
